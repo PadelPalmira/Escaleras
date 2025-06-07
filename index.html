@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Padel Palmira Escaleras</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+</head>
+<body>
+    <div id="seleccionCategoriaScreen" class="category-screen active-screen">
+        <div class="category-container">
+            <button id="adminLockBtn" class="admin-lock-btn" title="Modo Administrador"><i class="fas fa-lock"></i></button>
+            <img src="Images/PadelPalmira.PNG" alt="Padel Palmira Escaleras Logo" class="app-logo"> <h2>Padel Palmira Escaleras</h2>
+            <p>Selecciona o administra una categoría para continuar:</p>
+            <div id="listaCategoriasContainer" class="category-list">
+                </div>
+            <div id="categoryActions" class="category-actions admin-feature">
+                <input type="text" id="inputNuevaCategoria" class="styled-input" placeholder="Nombre nueva categoría">
+                <button id="btnAgregarCategoria" class="action-button primary-action"><i class="fas fa-plus"></i> Agregar Categoría</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="appContentScreen" class="app-container" style="display: none;">
+        <header class="app-header">
+            <div class="header-top-row">
+                <button id="btnVolverCategorias" class="action-button subtle-button back-to-categories"><i class="fas fa-layer-group"></i> Categorías</button>
+                <h1>Padel Palmira Escaleras</h1>
+                <span id="categoriaActivaHeader" class="active-category-display"></span>
+            </div>
+            <nav class="main-nav">
+                <button data-tab="inicio" class="nav-button active"><i class="fas fa-home"></i> <span class="nav-text">Inicio</span></button>
+                <button data-tab="torneos" class="nav-button"><i class="fas fa-trophy"></i> <span class="nav-text">Torneos</span></button>
+                <button data-tab="jugadores" class="nav-button"><i class="fas fa-users-cog"></i> <span class="nav-text">Jugadores</span></button>
+                <button data-tab="puntos" class="nav-button"><i class="fas fa-chart-line"></i> <span class="nav-text">Puntos Palmira</span></button>
+            </nav>
+        </header>
+
+        <main class="app-main">
+            <section id="inicio" class="tab-content active">
+                <div class="content-card">
+                    <h2 id="bienvenidoMsg">Bienvenido</h2>
+                    <p>Selecciona el tipo de torneo que deseas organizar o gestionar en esta categoría.</p>
+                    <div class="tournament-type-selection admin-feature">
+                        <button id="btnGoToCrearIndividual" class="action-button large-button">
+                            <i class="fas fa-user"></i> Individual (12 Jugadores)
+                        </button>
+                        <button id="btnGoToCrearParejas" class="action-button large-button">
+                            <i class="fas fa-users"></i> Parejas Fijas (6 Parejas)
+                        </button>
+                    </div>
+                    
+                    <div id="inicioDashboard" class="inicio-dashboard">
+                        <div class="dashboard-section">
+                            <h4><i class="fas fa-crown"></i> Top 5 Jugadores (<span class="dynamic-category-name">[Categoría]</span>)</h4>
+                            <ul id="top5RankingList" class="dashboard-list">
+                                </ul>
+                        </div>
+                        <div id="ultimoTorneoSection" class="dashboard-section hidden">
+                            <h4><i class="fas fa-history"></i> Último Torneo Finalizado</h4>
+                            <div id="ultimoTorneoInfo" class="dashboard-torneo-card">
+                                </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <section id="torneos" class="tab-content">
+                <div class="content-card">
+                    <div class="torneos-header">
+                        <h2>Torneos de <span class="dynamic-category-name">[Categoría]</span></h2>
+                        <button id="btnAbrirModalCrearTorneo" class="action-button primary-action admin-feature"><i class="fas fa-plus"></i> Crear Nuevo</button>
+                    </div>
+
+                    <div id="vistaListaTorneos">
+                        <h3><i class="fas fa-play-circle icon-subtle"></i> Torneos Actuales</h3>
+                        <ul id="listaTorneosActuales" class="tournament-list"></ul>
+                        <h3><i class="fas fa-history icon-subtle"></i> Histórico de Torneos</h3>
+                        <ul id="listaTorneosHistoricos" class="tournament-list"></ul>
+                    </div>
+
+                    <div id="vistaDetalleTorneo" class="tournament-detail-view" style="display: none;">
+                        <button id="btnVolverListaTorneos" class="action-button subtle-button back-button"><i class="fas fa-arrow-left"></i> Volver a Torneos</button>
+                        
+                        <div class="detail-header">
+                            <h3 id="nombreTorneoDetalle"></h3>
+                            <div class="tournament-actions-detail">
+                                <button id="btnEditarNombreTorneo" class="action-button subtle-button icon-only admin-feature" title="Editar Nombre del Torneo"><i class="fas fa-pen"></i></button>
+                                <button id="btnEliminarTorneoDetalle" class="action-button danger-action icon-only admin-feature" title="Eliminar Torneo"><i class="fas fa-trash"></i></button>
+                                <button id="btnExportarTorneoDetalle" class="action-button icon-only" title="Exportar Resultados del Torneo (JPG)"><i class="fas fa-share-square"></i></button>
+                            </div>
+                        </div>
+
+                        <div id="infoTipoTorneoDetalle" class="tournament-info-banner"></div>
+                        <h4><i class="fas fa-tasks icon-subtle"></i> Rondas y Resultados</h4>
+                        <div class="rondas-actions admin-feature">
+                            <button id="btnGenerarSiguienteRonda" class="action-button" style="display:none;"><i class="fas fa-cogs"></i> Generar Siguiente Ronda</button>
+                            <button id="btnFinalizarTorneo" class="action-button danger-action" style="display: none;"><i class="fas fa-flag-checkered"></i> Finalizar Torneo</button>
+                        </div>
+                        <div id="rondasContainer" class="rondas-grid"></div>
+                        <h4><i class="fas fa-clipboard-list icon-subtle"></i> Puntuación del Torneo</h4>
+                        <table id="tablaPuntosTorneoActual" class="styled-table">
+                            <thead><tr><th>Jugador/Pareja</th><th>P. Rondas</th><th>P. Extra</th><th>Total Puntos Palmira</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section id="jugadores" class="tab-content">
+                <div class="content-card">
+                    <h2><i class="fas fa-users-cog icon-subtle"></i> Jugadores de <span class="dynamic-category-name">[Categoría]</span></h2>
+                    <div class="player-list-controls">
+                        <input type="text" id="filtroNombreJugador" class="styled-input" placeholder="Buscar jugador por nombre...">
+                    </div>
+                    <ul id="listaGlobalJugadores" class="player-list"></ul>
+                </div>
+            </section>
+
+            <section id="puntos" class="tab-content">
+                <div class="content-card">
+                    <h2><i class="fas fa-medal icon-subtle"></i> Ranking Global Puntos Palmira (<span class="dynamic-category-name">[Categoría]</span>)</h2>
+                    <div class="filters">
+                        <div>
+                            <label for="filtroTipoTorneoResultados">Filtrar por tipo:</label>
+                            <select id="filtroTipoTorneoResultados" class="styled-select">
+                                <option value="todos">Todos</option>
+                                <option value="individual">Individual</option>
+                                <option value="parejas">Parejas Fijas</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="filtroMesResultados">Filtrar por mes:</label>
+                            <select id="filtroMesResultados" class="styled-select">
+                                <option value="todos">Todos los tiempos</option>
+                                </select>
+                        </div>
+                        <button id="btnExportarRankingGlobal" class="action-button"><i class="fas fa-share-square"></i> Exportar JPG</button>
+                    </div>
+                    <div id="resultadosJugadoresContainer">
+                        <table id="tablaResultadosGlobales" class="styled-table">
+                            <thead><tr><th>Pos.</th><th>Jugador</th><th>Total Puntos Palmira</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+        
+        <div id="modalCrearTorneo" class="modal">
+            <div class="modal-content">
+                <span class="close-button">&times;</span>
+                <h3>Crear Nuevo Torneo en <span class="dynamic-category-name-modal">[Categoría]</span></h3>
+                <label for="nombreTorneo">Nombre del Torneo:</label>
+                <input type="text" id="nombreTorneo" name="nombreTorneo" class="styled-input" required>
+                <label for="tipoTorneoModal">Tipo de Torneo:</label>
+                <select id="tipoTorneoModal" name="tipoTorneoModal" class="styled-select">
+                    <option value="individual">Individual (12 Jugadores)</option>
+                    <option value="parejas">Parejas Fijas (6 Parejas)</option>
+                </select>
+                <h4>Jugadores:</h4>
+                <div id="jugadoresInputContainer" class="jugadores-input-grid">
+                    </div>
+                <datalist id="sugerenciasJugadoresGlobales"></datalist>
+                <button id="btnConfirmarCrearTorneo" class="action-button primary-action full-width-button"><i class="fas fa-check-circle"></i> Crear Torneo</button>
+            </div>
+        </div>
+
+        <div id="modalEditarNombreJugador" class="modal">
+            <div class="modal-content">
+                <span class="close-button">&times;</span>
+                <h3>Editar Nombre de Jugador en <span class="dynamic-category-name-modal">[Categoría]</span></h3>
+                <label for="nombreJugadorActual">Nombre Actual:</label>
+                <input type="text" id="nombreJugadorActual" class="styled-input" readonly>
+                <label for="nombreJugadorNuevo">Nuevo Nombre:</label>
+                <input type="text" id="nombreJugadorNuevo" class="styled-input" required>
+                <p class="modal-warning">Advertencia: Cambiar este nombre actualizará todas las participaciones y resultados históricos del jugador DENTRO DE ESTA CATEGORÍA.</p>
+                <button id="btnConfirmarEditarNombreJugador" class="action-button primary-action full-width-button"><i class="fas fa-user-edit"></i> Guardar Cambios</button>
+            </div>
+        </div>
+
+        <div id="modalEditarCategoria" class="modal">
+            <div class="modal-content">
+                <span class="close-button">&times;</span>
+                <h3>Editar Nombre de Categoría</h3>
+                <label for="nombreCategoriaActual">Nombre Actual:</label>
+                <input type="text" id="nombreCategoriaActual" class="styled-input" readonly>
+                <label for="nombreCategoriaNuevo">Nuevo Nombre:</label>
+                <input type="text" id="nombreCategoriaNuevo" class="styled-input" required>
+                <p class="modal-warning">Advertencia: Cambiar este nombre actualizará la categoría en toda la aplicación. Esta acción es irreversible.</p>
+                <button id="btnConfirmarEditarCategoria" class="action-button primary-action full-width-button"><i class="fas fa-edit"></i> Guardar Cambios</button>
+            </div>
+        </div>
+
+        <div id="modalEditarResultado" class="modal" style="display:none;"> <div class="modal-content">
+                <span class="close-button">&times;</span>
+                <h3 id="tituloModalEditarRonda">Registrar/Editar Resultado</h3>
+                <div id="partidoInfoModal" class="partido-info-modal"></div>
+                <p>Haz clic en la pareja ganadora:</p>
+                <div id="botonesGanadorPartidoModal" class="winner-button-group">
+                    </div>
+                </div>
+        </div>
+
+        <div id="exportableMobileReport" class="exportable-content-mobile" style="display:none;">
+            <div class="report-header">
+                <img src="Images/PadelPalmira.PNG" alt="Logo Padel Palmira" class="report-logo">
+                <h3 id="reportTournamentTitle"></h3>
+                <p id="reportTournamentInfo"></p>
+            </div>
+            <div class="report-body">
+                <div class="report-table-header">
+                    </div>
+                <ul id="reportPlayerList" class="report-player-list">
+                    </ul>
+            </div>
+            <div class="report-footer">
+                <p>Resultados por Padel Palmira Escaleras</p>
+            </div>
+        </div>
+
+    </div> 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
