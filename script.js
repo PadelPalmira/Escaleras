@@ -632,7 +632,7 @@ document.addEventListener('DOMContentLoaded', () => {
         rondasContainerEl.innerHTML = '';
         btnEliminarTorneoDetalle.onclick = () => confirmarEliminarTorneo(torneo.id);
         btnEditarNombreTorneo.onclick = () => editarNombreTorneo(torneo.id);
-        
+
         btnExportarTorneoDetalle.style.display = torneo.estado === 'historico' ? 'inline-flex' : 'none';
         btnExportarTorneoDetalle.onclick = () => exportarReporteMovilTorneo(torneo.id);
 
@@ -663,61 +663,37 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function registrarResultadoPartido(torneoId, rondaIdx, partidoIdx, canchaNum, equipoSeleccionadoKey) {
-        if (!categoriaActiva || !isAdminMode) return;
+        if (!isAdminMode) return;
         const torneo = torneos.find(t => t.id === torneoId);
-        if (!torneo) return;
+        if (!torneo || torneo.estado === 'historico') return;
+
         const partido = torneo.rondas[rondaIdx].partidos[partidoIdx];
-        const ganadorOriginalPartido = partido.ganadorEquipoKey;
-
-        // **INICIO DE CORRECCIÓN**
-        // Si se hace clic en el mismo ganador, se limpia el resultado para poder corregir.
-        if (ganadorOriginalPartido === equipoSeleccionadoKey) {
-            if (confirm("Este equipo ya es el ganador. ¿Deseas quitar el resultado de este partido para poder corregirlo?")) {
-                // 1. Revertir puntos del ganador original.
-                const puntosCancha = PUNTOS_POR_CANCHA[canchaNum];
-                const ganadoresAnterioresNombres = ganadorOriginalPartido === 'equipo1' ? partido.equipo1 : partido.equipo2;
-                modificarPuntosRondaYTorneo(torneo, ganadoresAnterioresNombres, torneo.tipo === 'parejas' ? partido.datosParejasSiAplica : null, ganadorOriginalPartido, -puntosCancha, canchaNum, false);
-                
-                // 2. Limpiar el ganador.
-                partido.ganadorEquipoKey = null;
-
-                // 3. Guardar y re-renderizar la vista para reflejar el estado "limpio".
-                guardarDatosCategoriaActual();
-                renderizarDetalleTorneo(torneoId);
-            }
-            // Detener la función aquí, el usuario debe ahora seleccionar un ganador en el partido limpio.
-            return;
-        }
-        // **FIN DE CORRECCIÓN**
-
-        // Lógica para editar un torneo finalizado
-        const esEdicionDeFinalizadoOriginal = torneo.estado === 'historico';
-        if (esEdicionDeFinalizadoOriginal) {
-            if (confirm(`Este torneo está finalizado. Cambiar este resultado borrará todas las rondas posteriores y reabrirá el torneo.\n\n¿Deseas continuar?`)) {
-                // ... lógica para borrar rondas posteriores ...
-                // (Se mantiene igual que antes)
-            } else {
-                return;
-            }
-        }
+        const ganadorOriginal = partido.ganadorEquipoKey;
+        const puntosCancha = PUNTOS_POR_CANCHA[canchaNum];
         
-        // Lógica para asignar un nuevo ganador (se mantiene igual)
-        if (ganadorOriginalPartido) {
-            const puntosCancha = PUNTOS_POR_CANCHA[canchaNum];
-            const ganadoresAnterioresNombres = ganadorOriginalPartido === 'equipo1' ? partido.equipo1 : partido.equipo2;
-            modificarPuntosRondaYTorneo(torneo, ganadoresAnterioresNombres, torneo.tipo === 'parejas' ? partido.datosParejasSiAplica : null, ganadorOriginalPartido, -puntosCancha, canchaNum, false);
+        if (ganadorOriginal === equipoSeleccionadoKey) {
+            if (confirm("Este equipo ya está marcado como ganador. ¿Deseas LIMPIAR el resultado de este partido?")) {
+                const ganadoresAnterioresNombres = ganadorOriginal === 'equipo1' ? partido.equipo1 : partido.equipo2;
+                modificarPuntosRondaYTorneo(torneo, ganadoresAnterioresNombres, torneo.tipo === 'parejas' ? partido.datosParejasSiAplica : null, ganadorOriginal, -puntosCancha, canchaNum, false);
+                partido.ganadorEquipoKey = null;
+            } else {
+                return; 
+            }
+        } 
+        else {
+            if (ganadorOriginal) {
+                const ganadoresAnterioresNombres = ganadorOriginal === 'equipo1' ? partido.equipo1 : partido.equipo2;
+                modificarPuntosRondaYTorneo(torneo, ganadoresAnterioresNombres, torneo.tipo === 'parejas' ? partido.datosParejasSiAplica : null, ganadorOriginal, -puntosCancha, canchaNum, false);
+            }
+            partido.ganadorEquipoKey = equipoSeleccionadoKey;
+            const nuevosGanadoresNombres = equipoSeleccionadoKey === 'equipo1' ? partido.equipo1 : partido.equipo2;
+            modificarPuntosRondaYTorneo(torneo, nuevosGanadoresNombres, torneo.tipo === 'parejas' ? partido.datosParejasSiAplica : null, equipoSeleccionadoKey, puntosCancha, canchaNum, true);
         }
-
-        partido.ganadorEquipoKey = equipoSeleccionadoKey;
-        const puntosNuevos = PUNTOS_POR_CANCHA[canchaNum];
-        const nuevosGanadoresNombres = equipoSeleccionadoKey === 'equipo1' ? partido.equipo1 : partido.equipo2;
-        modificarPuntosRondaYTorneo(torneo, nuevosGanadoresNombres, torneo.tipo === 'parejas' ? partido.datosParejasSiAplica : null, equipoSeleccionadoKey, puntosNuevos, canchaNum, true);
 
         guardarDatosCategoriaActual();
         renderizarDetalleTorneo(torneoId);
     }
     
-    // (El resto de las funciones se mantienen igual)
     function modificarPuntosRondaYTorneo(t, nJugs, dP, eqK, cantP, cN, esVic) {
         const esC1 = cN === 1;
         if (t.tipo === 'individual') {
@@ -1151,8 +1127,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const jugadoresArray = Object.values(jugadoresGlobal).map(data => ({
-            nombre: Object.keys(jugadoresGlobal).find(key => jugadoresGlobal[key] === data),
+        const jugadoresArray = Object.entries(jugadoresGlobal).map(([nombre, data]) => ({
+            nombre,
             puntos: data.puntosTotalesPorTipo.todos || 0
         }));
 
@@ -1200,6 +1176,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- GESTIÓN DE JUGADORES (TAB) ---
     filtroNombreJugadorInput.addEventListener('input', () => renderizarListaGlobalJugadores());
     function renderizarListaGlobalJugadores() {
         if (!categoriaActiva) return; 
