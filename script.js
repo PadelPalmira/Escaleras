@@ -625,73 +625,136 @@ document.addEventListener('DOMContentLoaded', () => {
     function crearElementoLiTorneo(torneo) { const li = document.createElement('li'); const fecha = new Date(torneo.fechaCreacion); const fechaFmt = `${fecha.getDate().toString().padStart(2,'0')}/${(fecha.getMonth()+1).toString().padStart(2,'0')}/${fecha.getFullYear()}`; li.innerHTML = `<div class="tournament-details"><span class="tournament-name">${torneo.nombre}</span><span class="tournament-date">Creado: ${fechaFmt} - ${torneo.tipo}</span></div><div class="tournament-actions-list"><span class="tournament-status ${torneo.estado}">${torneo.estado==='actual'?'En curso':'Finalizado'}</span></div>`; li.dataset.torneoId = torneo.id; li.addEventListener('click', (e) => { if(e.target.closest('button')) return; seleccionarTorneo(torneo.id)}); return li; }
     function seleccionarTorneo(torneoId) { if (!categoriaActiva) return; torneoActualSeleccionadoId = torneoId; vistaListaTorneosEl.style.display = 'none'; vistaDetalleTorneoEl.style.display = 'block'; renderizarDetalleTorneo(torneoId); }
     btnVolverListaTorneos.addEventListener('click', () => { if(!categoriaActiva) return; mostrarVistaListaTorneos(); renderizarListasDeTorneos(); });
+    
     function renderizarDetalleTorneo(torneoId) { 
-        if (!categoriaActiva) return; const torneo = torneos.find(t => t.id === torneoId); if (!torneo) { mostrarVistaListaTorneos(); return; }
-        nombreTorneoDetalleEl.textContent = torneo.nombre; const fechaC = new Date(torneo.fechaCreacion);
+        if (!categoriaActiva) return; 
+        const torneo = torneos.find(t => t.id === torneoId); 
+        if (!torneo) { mostrarVistaListaTorneos(); return; }
+        
+        console.log(`--- Renderizando Detalle del Torneo: ${torneo.nombre} ---`);
+
+        nombreTorneoDetalleEl.textContent = torneo.nombre; 
+        const fechaC = new Date(torneo.fechaCreacion);
         infoTipoTorneoDetalleEl.textContent = `Tipo: ${torneo.tipo} | Estado: ${torneo.estado==='actual'?'En Curso':'Finalizado'} | Creado: ${fechaC.toLocaleDateString()}`;
-        rondasContainerEl.innerHTML = '';
+        
         btnEliminarTorneoDetalle.onclick = () => confirmarEliminarTorneo(torneo.id);
         btnEditarNombreTorneo.onclick = () => editarNombreTorneo(torneo.id);
-
-        btnExportarTorneoDetalle.style.display = torneo.estado === 'historico' ? 'inline-flex' : 'none';
         btnExportarTorneoDetalle.onclick = () => exportarReporteMovilTorneo(torneo.id);
+        
+        btnExportarTorneoDetalle.style.display = torneo.estado === 'historico' ? 'inline-flex' : 'none';
 
+        rondasContainerEl.innerHTML = '';
         torneo.rondas.forEach((ronda, rIdx) => {
-            const rondaCard = document.createElement('div'); rondaCard.className = 'ronda-card';
+            const rondaCard = document.createElement('div'); 
+            rondaCard.className = 'ronda-card';
             let htmlR = `<h5>Ronda ${ronda.numero}</h5>`;
             ronda.partidos.forEach((partido, pIdx) => {
+                console.log(`Renderizando HTML para Ronda ${ronda.numero}, Partido ${pIdx + 1}. Ganador en datos: ${partido.ganadorEquipoKey}`);
                 htmlR += `<div class="cancha-match" data-ronda-idx="${rIdx}" data-partido-idx="${pIdx}" data-cancha-num="${partido.cancha}"><h6>Cancha ${partido.cancha}</h6>
                 <button class="team-button ${partido.ganadorEquipoKey==='equipo1'?'winner':(partido.ganadorEquipoKey?'loser':'')}" data-equipo="equipo1">${partido.equipo1.join(' & ')}</button>
                 <div class="vs-separator">VS</div>
                 <button class="team-button ${partido.ganadorEquipoKey==='equipo2'?'winner':(partido.ganadorEquipoKey?'loser':'')}" data-equipo="equipo2">${partido.equipo2.join(' & ')}</button></div>`;
             });
-            rondaCard.innerHTML = htmlR; rondasContainerEl.appendChild(rondaCard);
+            rondaCard.innerHTML = htmlR; 
+            rondasContainerEl.appendChild(rondaCard);
         });
+
         if (torneo.rondas.length === 0) rondasContainerEl.innerHTML = '<p>No hay rondas generadas.</p>';
+        
         rondasContainerEl.querySelectorAll('.cancha-match .team-button').forEach(button => {
             button.addEventListener('click', (e) => {
                 if (!isAdminMode) return;
-                const canchaMatchDiv = e.currentTarget.closest('.cancha-match'); const rIdx = parseInt(canchaMatchDiv.dataset.rondaIdx);
-                const pIdx = parseInt(canchaMatchDiv.dataset.partidoIdx); const cNum = parseInt(canchaMatchDiv.dataset.canchaNum);
+                const canchaMatchDiv = e.currentTarget.closest('.cancha-match'); 
+                const rIdx = parseInt(canchaMatchDiv.dataset.rondaIdx);
+                const pIdx = parseInt(canchaMatchDiv.dataset.partidoIdx); 
+                const cNum = parseInt(canchaMatchDiv.dataset.canchaNum);
                 const eqGanadorKey = e.currentTarget.dataset.equipo;
                 registrarResultadoPartido(torneo.id, rIdx, pIdx, cNum, eqGanadorKey);
             });
         });
+
+        const ultimaRonda = torneo.rondas.length > 0 ? torneo.rondas[torneo.rondas.length - 1] : null;
+        const puedeGenRonda = torneo.estado === 'actual' && 
+                             torneo.rondas.length < MAX_RONDAS && 
+                             (ultimaRonda && ultimaRonda.partidos.every(p => p.ganadorEquipoKey !== null));
+        
+        console.log(`Chequeo para botón 'Generar': puedeGenRonda = ${puedeGenRonda}`);
+        if(ultimaRonda) {
+             console.log("Estado de ganadores en última ronda:", ultimaRonda.partidos.map(p => p.ganadorEquipoKey));
+        }
+
+        btnGenerarSiguienteRonda.style.display = puedeGenRonda ? 'inline-flex' : 'none';
         
         renderizarTablaPuntosTorneoActual(torneo);
         updateAdminUI();
     }
 
     function registrarResultadoPartido(torneoId, rondaIdx, partidoIdx, canchaNum, equipoSeleccionadoKey) {
-        if (!isAdminMode) return;
+        console.log("--- INICIO DE registrarResultadoPartido ---");
+        console.log(`Argumentos: torneoId=${torneoId}, rondaIdx=${rondaIdx}, partidoIdx=${partidoIdx}, equipoSeleccionadoKey=${equipoSeleccionadoKey}`);
+        
+        if (!isAdminMode) {
+            console.log("Acción denegada: no es modo admin.");
+            return;
+        }
+
         const torneo = torneos.find(t => t.id === torneoId);
-        if (!torneo || torneo.estado === 'historico') return;
+        if (!torneo) {
+            console.error("No se encontró el torneo con ID:", torneoId);
+            return;
+        }
+        if (torneo.estado === 'historico') {
+            alert("No se puede modificar un torneo ya finalizado. Debe reabrirlo primero (función futura).");
+            return;
+        }
 
         const partido = torneo.rondas[rondaIdx].partidos[partidoIdx];
+        console.log("Estado del partido ANTES de modificar:", JSON.parse(JSON.stringify(partido)));
+        
         const ganadorOriginal = partido.ganadorEquipoKey;
         const puntosCancha = PUNTOS_POR_CANCHA[canchaNum];
-        
+
+        // --- RUTA 1: Se hace clic en el ganador actual para LIMPIAR el resultado ---
         if (ganadorOriginal === equipoSeleccionadoKey) {
-            if (confirm("Este equipo ya está marcado como ganador. ¿Deseas LIMPIAR el resultado de este partido?")) {
+            console.log("Lógica: Se hizo clic en el ganador existente. Mostrando confirmación para limpiar.");
+            if (confirm("Este equipo ya está marcado como ganador. ¿Deseas LIMPIAR el resultado de este partido para poder corregirlo?")) {
+                console.log("Usuario confirmó LIMPIAR el resultado.");
+                // Revertir puntos del ganador que se está quitando
                 const ganadoresAnterioresNombres = ganadorOriginal === 'equipo1' ? partido.equipo1 : partido.equipo2;
                 modificarPuntosRondaYTorneo(torneo, ganadoresAnterioresNombres, torneo.tipo === 'parejas' ? partido.datosParejasSiAplica : null, ganadorOriginal, -puntosCancha, canchaNum, false);
+                
+                // Limpiar el ganador
                 partido.ganadorEquipoKey = null;
+                console.log("Estado del partido DESPUÉS de limpiar:", JSON.parse(JSON.stringify(partido)));
             } else {
-                return; 
+                console.log("Usuario canceló la limpieza.");
+                return; // El usuario canceló la acción
             }
         } 
+        // --- RUTA 2: Se establece un ganador nuevo o se cambia de un equipo a otro ---
         else {
+            console.log("Lógica: Se está estableciendo un ganador nuevo o cambiando el ganador.");
+            // Revertir puntos si había un ganador PREVIO y DIFERENTE
             if (ganadorOriginal) {
+                console.log(`Había un ganador original (${ganadorOriginal}). Revirtiendo sus puntos.`);
                 const ganadoresAnterioresNombres = ganadorOriginal === 'equipo1' ? partido.equipo1 : partido.equipo2;
                 modificarPuntosRondaYTorneo(torneo, ganadoresAnterioresNombres, torneo.tipo === 'parejas' ? partido.datosParejasSiAplica : null, ganadorOriginal, -puntosCancha, canchaNum, false);
             }
+            
+            // Establecer el nuevo ganador
             partido.ganadorEquipoKey = equipoSeleccionadoKey;
+            console.log(`Nuevo ganador establecido a: ${equipoSeleccionadoKey}`);
+            
+            // Otorgar puntos al nuevo ganador
             const nuevosGanadoresNombres = equipoSeleccionadoKey === 'equipo1' ? partido.equipo1 : partido.equipo2;
             modificarPuntosRondaYTorneo(torneo, nuevosGanadoresNombres, torneo.tipo === 'parejas' ? partido.datosParejasSiAplica : null, equipoSeleccionadoKey, puntosCancha, canchaNum, true);
         }
 
+        // Guardar cambios y refrescar la vista
         guardarDatosCategoriaActual();
+        console.log("Llamando a renderizarDetalleTorneo para refrescar la vista...");
         renderizarDetalleTorneo(torneoId);
+        console.log("--- FIN DE registrarResultadoPartido ---");
     }
     
     function modificarPuntosRondaYTorneo(t, nJugs, dP, eqK, cantP, cN, esVic) {
