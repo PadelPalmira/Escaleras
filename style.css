@@ -429,17 +429,9 @@ body {
 .rondas-actions {
     display: flex;
     gap: 14px; 
-    margin-bottom: 10px; /* Reducido */
+    margin-bottom: 22px;
     flex-wrap: wrap;
 }
-/* NUEVO: Mensaje de estado */
-.status-message {
-    font-size: 0.9em;
-    font-style: italic;
-    color: #666;
-    margin-bottom: 22px;
-}
-
 .rondas-grid {
     display: grid;
     gap: 22px; 
@@ -451,40 +443,22 @@ body {
     padding: 20px;
     box-shadow: 0 3px 7px rgba(0,0,0,0.07);
 }
-/* NUEVO: Contenedor para título y botón de limpiar */
-.ronda-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 18px;
-    border-bottom: 2px solid var(--palmira-pink-light); 
-    padding-bottom: 10px;
-}
-.ronda-header h5 {
+.ronda-card h5 {
     font-size: 1.2em; 
     font-weight: 700; 
     color: var(--palmira-pink); 
-    margin: 0;
-    border-bottom: none;
-    padding-bottom: 0;
-    text-align: left;
+    margin-bottom: 18px;
+    border-bottom: 2px solid var(--palmira-pink-light); 
+    padding-bottom: 10px;
+    text-align: center;
 }
-.clear-round-results-btn {
-    padding: 5px 10px;
-    font-size: 0.8em;
-    gap: 6px;
-    background: var(--palmira-medium-gray);
-    color: var(--palmira-dark-text);
-    text-transform: none;
-    letter-spacing: normal;
-}
-
 .cancha-match { 
     margin-bottom: 18px; 
     padding: 14px; 
     border: 1px solid #d0d0d0; 
     border-radius: var(--border-radius-medium); 
     background-color: #fcfcfc; 
+    position: relative; /* Needed for positioning the edit button */
 }
 .cancha-match h6 { 
     font-weight: 600; 
@@ -530,6 +504,33 @@ body {
     opacity: 0.65; 
     background-color: #e9ecef;
     border-color: var(--palmira-medium-gray); 
+}
+
+/* Edit match button (NEW) */
+.edit-match-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background-color: rgba(255, 255, 255, 0.8);
+    border: 1px solid var(--palmira-medium-gray);
+    color: var(--palmira-pink);
+    font-size: 0.9em;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 5;
+}
+
+.edit-match-btn:hover {
+    background-color: var(--palmira-pink);
+    color: var(--palmira-white);
+    transform: scale(1.1);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
 }
 
 /* Styled Tables */
@@ -633,6 +634,26 @@ body {
     border: 1px solid var(--palmira-medium-gray); 
 }
 .partido-info-modal strong { color: var(--palmira-dark-text); }
+
+/* Styles for Edit Match Modal (NEW) */
+.edit-match-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 12px 10px;
+    margin-top: 15px;
+    margin-bottom: 15px;
+}
+.edit-match-grid label {
+    font-weight: 600;
+    font-size: 0.9em;
+    text-align: right;
+    margin-bottom: 0;
+}
+.edit-match-grid .styled-select {
+    margin-bottom: 0;
+}
+
 
 .filters {
     margin-bottom: 22px; 
@@ -794,24 +815,8 @@ body {
     .category-actions input { margin-bottom: 0; flex-grow: 1; }
 }
 
-/* Modal de selección de ganador */
 .winner-button-group { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
-.winner-button-group .team-button-modal { 
-    padding: 14px; text-align: center; border: 1px solid var(--palmira-medium-gray); 
-    border-radius: var(--border-radius-medium); background-color: var(--palmira-white); 
-    color: var(--palmira-dark-text); cursor: pointer; transition: all 0.2s ease; 
-    font-weight: 600; font-size: 1.05em; 
-}
-.winner-button-group .team-button-modal:hover { 
-    border-color: var(--palmira-pink); background-color: var(--palmira-pink-light); 
-}
-.winner-button-group .team-button-modal.selected-winner { 
-    background-color: var(--palmira-cyan); border-color: var(--palmira-cyan-darker); 
-    color: var(--palmira-black); 
-}
 .dynamic-category-name-modal { font-weight: bold; color: var(--palmira-pink); }
-.player-list-controls { margin-bottom: 18px; }
-
 
 /* === NUEVOS ESTILOS PARA DASHBOARD INICIO === */
 .inicio-dashboard {
@@ -904,7 +909,7 @@ body {
     font-size: 1.6em;
     color: var(--palmira-dark-text); 
     margin: 0 0 5px 0;
-    text-shadow: none; 
+    text-shadow: none;
 }
 .report-header p {
     font-size: 1em;
@@ -1040,4 +1045,6 @@ body {
     }
     .admin-lock-btn { top: 15px; right: 15px; width: 44px; height: 44px; font-size: 1.2em; }
     .category-container { padding: 40px 20px; }
+    .edit-match-grid { grid-template-columns: 1fr; }
+    .edit-match-grid label { text-align: left;}
 }
