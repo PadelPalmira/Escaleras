@@ -429,9 +429,17 @@ body {
 .rondas-actions {
     display: flex;
     gap: 14px; 
-    margin-bottom: 22px;
+    margin-bottom: 10px; /* Reducido */
     flex-wrap: wrap;
 }
+/* NUEVO: Mensaje de estado */
+.status-message {
+    font-size: 0.9em;
+    font-style: italic;
+    color: #666;
+    margin-bottom: 22px;
+}
+
 .rondas-grid {
     display: grid;
     gap: 22px; 
@@ -443,15 +451,34 @@ body {
     padding: 20px;
     box-shadow: 0 3px 7px rgba(0,0,0,0.07);
 }
-.ronda-card h5 {
-    font-size: 1.2em; 
-    font-weight: 700; 
-    color: var(--palmira-pink); 
+/* NUEVO: Contenedor para título y botón de limpiar */
+.ronda-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 18px;
     border-bottom: 2px solid var(--palmira-pink-light); 
     padding-bottom: 10px;
-    text-align: center;
 }
+.ronda-header h5 {
+    font-size: 1.2em; 
+    font-weight: 700; 
+    color: var(--palmira-pink); 
+    margin: 0;
+    border-bottom: none;
+    padding-bottom: 0;
+    text-align: left;
+}
+.clear-round-results-btn {
+    padding: 5px 10px;
+    font-size: 0.8em;
+    gap: 6px;
+    background: var(--palmira-medium-gray);
+    color: var(--palmira-dark-text);
+    text-transform: none;
+    letter-spacing: normal;
+}
+
 .cancha-match { 
     margin-bottom: 18px; 
     padding: 14px; 
@@ -866,25 +893,21 @@ body {
     text-align: center;
     padding: 25px;
     border-bottom: 2px solid var(--palmira-cyan);
-    /* Fondo claro para el header */
     background-color: var(--palmira-white);
     border-radius: 12px 12px 0 0;
 }
 .report-logo {
-    /* Estilos del logo revertidos a normal */
     max-width: 120px;
     margin-bottom: 15px;
 }
 .report-header h3 {
     font-size: 1.6em;
-    /* Color de texto oscuro para fondo claro */
     color: var(--palmira-dark-text); 
     margin: 0 0 5px 0;
-    text-shadow: none; /* Quitar sombra */
+    text-shadow: none; 
 }
 .report-header p {
     font-size: 1em;
-    /* Color de texto gris para fondo claro */
     color: #555;
     margin: 0;
     font-weight: 500;
