@@ -178,26 +178,68 @@ document.addEventListener('DOMContentLoaded', () => {
             appData.listaCategorias = ["Fallback"]; appData.datosPorCategoria = {"Fallback": { torneos: [], jugadoresGlobal: {} }}; appData.ultimaCategoriaActiva = null;
         }
     }
+    
+    // CORRECCIÓN: Se reemplaza la función de guardado con una versión inmediata y más robusta.
+    let isSaving = false;
     async function guardarDatosGlobales() {
         if (!isAdminMode) {
             console.warn("Intento de guardado sin ser admin. Operación denegada.");
             return;
         }
-        console.log("Intentando guardar datos en Google Sheet...");
-        if (guardarDatosGlobales.timeoutId) clearTimeout(guardarDatosGlobales.timeoutId);
-        guardarDatosGlobales.timeoutId = setTimeout(async () => {
-            try {
-                const response = await fetch(APPS_SCRIPT_URL, {
-                    method: 'POST', mode: 'cors', headers: {'Content-Type': 'text/plain;charset=utf-8'},
-                    body: JSON.stringify(appData)
-                });
-                if (!response.ok) { let eM = `Error red: ${response.status} ${response.statusText}`; try {const eB=await response.json();eM=eB.message||eM;}catch(e){} throw new Error(eM); }
-                const result = await response.json();
-                if (result.status === "success") console.log("Datos guardados en Google Sheet.", result.message);
-                else { console.error("Error Apps Script al guardar:", result.message); alert("Error al guardar en Google Sheets:\n" + result.message); }
-            } catch (error) { console.error("Error CRÍTICO al guardar:", error); alert("No se pudieron guardar los datos.\nError: " + error.message); }
-        }, 1500);
+        if (isSaving) {
+            console.warn("Guardado ya en progreso. Se omite la llamada actual.");
+            return;
+        }
+        
+        console.log("Iniciando guardado de datos en Google Sheet...");
+        isSaving = true;
+        // En una implementación futura, aquí se podría mostrar un indicador de "Guardando..."
+        
+        try {
+            // Usamos un timeout para la petición, para que no se quede colgada indefinidamente
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 segundos de timeout
+
+            const response = await fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                mode: 'cors',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(appData),
+                signal: controller.signal // Asociamos el AbortController
+            });
+
+            clearTimeout(timeoutId); // Limpiamos el timeout si la respuesta llega a tiempo
+
+            if (!response.ok) {
+                let eM = `Error de red: ${response.status} ${response.statusText}`;
+                try {
+                    const eB = await response.json();
+                    eM = eB.message || eM;
+                } catch (e) {}
+                throw new Error(eM);
+            }
+
+            const result = await response.json();
+            if (result.status === "success") {
+                console.log("Datos guardados exitosamente en Google Sheet.", result.message);
+            } else {
+                console.error("Error desde Apps Script al guardar:", result.message);
+                alert("Error al guardar los datos en Google Sheets:\n" + result.message);
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                console.error("Error CRÍTICO al guardar datos: La petición tardó demasiado y fue abortada.", error);
+                alert("No se pudieron guardar los datos en la nube: La conexión es demasiado lenta.");
+            } else {
+                console.error("Error CRÍTICO al guardar datos:", error);
+                alert("No se pudieron guardar los datos en la nube.\nError: " + error.message);
+            }
+        } finally {
+            isSaving = false;
+            // Aquí se ocultaría el indicador de "Guardando..."
+        }
     }
+
     function renderizarListaCategorias() {
         listaCategoriasContainerEl.innerHTML = '';
         if (appData.listaCategorias.length === 0) {
@@ -459,7 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         generarRondaInicial(nuevoTorneo); 
         torneos.push(nuevoTorneo); 
-        guardarDatosCategoriaActual(); // CORRECCIÓN: Esta línea está ahora activa.
+        guardarDatosCategoriaActual();
         closeModal(modalCrearTorneo); 
         seleccionarTorneo(nuevoTorneo.id);
     });
