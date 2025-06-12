@@ -457,8 +457,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 registrarJugadorGlobal(j1N); registrarJugadorGlobal(j2N);
             }
         }
-        generarRondaInicial(nuevoTorneo); torneos.push(nuevoTorneo); guardarDatosCategoriaActual();
-        closeModal(modalCrearTorneo); seleccionarTorneo(nuevoTorneo.id);
+        generarRondaInicial(nuevoTorneo); 
+        torneos.push(nuevoTorneo); 
+        guardarDatosCategoriaActual(); // CORRECCIÓN: Esta línea está ahora activa.
+        closeModal(modalCrearTorneo); 
+        seleccionarTorneo(nuevoTorneo.id);
     });
     function registrarJugadorGlobal(nombreJugadorOriginal) {
         if (!categoriaActiva || !isAdminMode) return; const nombreNormalizado = nombreJugadorOriginal.toLowerCase();
