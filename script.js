@@ -1,4 +1,3 @@
-// script.js
 document.addEventListener('DOMContentLoaded', () => {
     // --- ESTADO GLOBAL DE LA APLICACIÓN ---
     let appData = {
@@ -8,6 +7,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     let categoriaActiva = null;
     let isAdminMode = false;
+    let isSaving = false; // Flag para controlar el estado de guardado
+    let lastError = null; // NUEVO: Para almacenar el último error de guardado
 
     // Referencias a los datos de la categoría activa
     let torneos = [];
@@ -20,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const PUNTOS_POR_CANCHA = { 1: 3, 2: 2, 3: 1 };
     const PUNTOS_EXTRA_INDIVIDUAL = { 1: 600, 2: 500, 3: 400, 4: 300, 5: 250, 6: 200, 7: 175, 8: 150, 9: 125, 10: 100, 11: 75, 12: 50 };
     const PUNTOS_EXTRA_PAREJAS = { 1: 600, 2: 500, 3: 400, 4: 300, 5: 200, 6: 100 };
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwEXT8SU9tx9ICnxcfOHDQ1uF7rsbo9wSgw1D7k-Al0GBnyH8yRCBmWm9bt0U-6nqq2mw/exec';
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzwLSkL7J_vmqsgIovSYv9eO0QZR46SaABihXsDCFDDz2OKkFdKix8naMMIgqskt3aX-w/exec';
     const ADMIN_PASSWORD = '5858';
     const ADMIN_SESSION_DURATION = 4 * 60 * 60 * 1000; // 4 horas en milisegundos
 
@@ -39,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalCrearTorneo = document.getElementById('modalCrearTorneo');
     const modalEditarNombreJugador = document.getElementById('modalEditarNombreJugador');
     const modalEditarCategoria = document.getElementById('modalEditarCategoria');
-    const modalEditarPartido = document.getElementById('modalEditarPartido'); // NEW
+    const modalEditarPartido = document.getElementById('modalEditarPartido');
     const closeModalButtons = document.querySelectorAll('.modal .close-button');
     const btnGoToCrearIndividual = document.getElementById('btnGoToCrearIndividual');
     const btnGoToCrearParejas = document.getElementById('btnGoToCrearParejas');
@@ -69,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const nombreJugadorNuevoInput = document.getElementById('nombreJugadorNuevo');
     const btnConfirmarEditarNombreJugador = document.getElementById('btnConfirmarEditarNombreJugador');
     const btnConfirmarEditarCategoria = document.getElementById('btnConfirmarEditarCategoria');
-    const btnConfirmarEditarPartido = document.getElementById('btnConfirmarEditarPartido'); // NEW
+    const btnConfirmarEditarPartido = document.getElementById('btnConfirmarEditarPartido');
     const tablaResultadosGlobalesBodyEl = document.querySelector('#tablaResultadosGlobales tbody');
     const filtroTipoTorneoResultadosEl = document.getElementById('filtroTipoTorneoResultados');
     const filtroMesResultadosEl = document.getElementById('filtroMesResultados');
@@ -83,9 +84,63 @@ document.addEventListener('DOMContentLoaded', () => {
     let torneoActualSeleccionadoId = null;
     let jugadorParaEditarNombre = null;
     let categoriaParaEditarNombre = null;
-    let partidoParaEditar = { torneoId: null, rondaIdx: null, partidoIdx: null }; // NEW
+    let partidoParaEditar = { torneoId: null, rondaIdx: null, partidoIdx: null };
 
-    // --- GESTIÓN DE MODO ADMIN ---
+    let saveStatusIndicator;
+    function createSaveStatusIndicator() {
+        if (document.getElementById('saveStatusIndicator')) return;
+        const headerTopRow = document.querySelector('.header-top-row');
+        if (!headerTopRow) return;
+
+        saveStatusIndicator = document.createElement('div');
+        saveStatusIndicator.id = 'saveStatusIndicator';
+        saveStatusIndicator.className = 'save-status-indicator';
+        headerTopRow.appendChild(saveStatusIndicator);
+    }
+
+    function createForceReloadButton() {
+        const nav = document.querySelector('.main-nav');
+        if (!nav || document.getElementById('forceReloadBtn')) return;
+
+        const reloadButton = document.createElement('button');
+        reloadButton.id = 'forceReloadBtn';
+        reloadButton.className = 'nav-button';
+        reloadButton.title = 'Sincronizar con la nube';
+        reloadButton.innerHTML = `<i class="fas fa-sync-alt"></i>`;
+        reloadButton.addEventListener('click', async () => {
+            if (isSaving) {
+                alert("Por favor espera a que termine la operación actual.");
+                return;
+            }
+            if (confirm("Esto recargará todos los datos desde la nube. Los cambios no guardados se perderán. ¿Deseas continuar?")) {
+                await initApp();
+            }
+        });
+        nav.appendChild(reloadButton);
+    }
+
+
+    function updateSaveStatus(status, message) {
+        if (!saveStatusIndicator) return;
+
+        saveStatusIndicator.style.opacity = '1';
+        saveStatusIndicator.textContent = message;
+
+        switch (status) {
+            case 'saving':
+                saveStatusIndicator.className = 'save-status-indicator saving';
+                break;
+            case 'success':
+                 saveStatusIndicator.className = 'save-status-indicator success';
+                setTimeout(() => { saveStatusIndicator.style.opacity = '0'; }, 2000);
+                break;
+            case 'error':
+                saveStatusIndicator.className = 'save-status-indicator error';
+                setTimeout(() => { saveStatusIndicator.style.opacity = '0'; }, 5000);
+                break;
+        }
+    }
+
     function checkAdminSession() {
         const adminTimestamp = localStorage.getItem('adminUnlockTimestamp');
         if (adminTimestamp) {
@@ -93,9 +148,6 @@ document.addEventListener('DOMContentLoaded', () => {
             isAdminMode = timeElapsed < ADMIN_SESSION_DURATION;
             if (!isAdminMode) {
                 localStorage.removeItem('adminUnlockTimestamp');
-                console.log("Sesión de administrador expirada.");
-            } else {
-                 console.log("Sesión de administrador activa.");
             }
         } else {
             isAdminMode = false;
@@ -115,7 +167,6 @@ document.addEventListener('DOMContentLoaded', () => {
             adminLockBtn.title = isAdminMode ? "Modo Administrador Desbloqueado" : "Desbloquear Modo Administrador";
         }
 
-        // Enable/disable result buttons based on admin mode
         rondasContainerEl.querySelectorAll('.team-button').forEach(button => {
             button.classList.toggle('admin-mode-enabled', isAdminMode);
         });
@@ -143,107 +194,77 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- GESTIÓN DE CATEGORÍAS ---
     async function cargarDatosGlobales() {
         console.log("Cargando datos desde Google Sheet...");
         try {
-            const response = await fetch(APPS_SCRIPT_URL);
+            const response = await fetch(`${APPS_SCRIPT_URL}?timestamp=${new Date().getTime()}`, { cache: 'no-cache' });
             if (!response.ok) { throw new Error(`Error de red al cargar datos: ${response.statusText}`); }
             const dataDesdeSheet = await response.json();
             if (dataDesdeSheet && typeof dataDesdeSheet === 'object') {
-                appData.listaCategorias = dataDesdeSheet.listaCategorias || [];
-                appData.datosPorCategoria = dataDesdeSheet.datosPorCategoria || {};
-                appData.ultimaCategoriaActiva = dataDesdeSheet.ultimaCategoriaActiva || null;
-                appData.listaCategorias.forEach(cat => {
-                    if (!appData.datosPorCategoria[cat]) appData.datosPorCategoria[cat] = { torneos: [], jugadoresGlobal: {} };
-                    else {
-                        if (!appData.datosPorCategoria[cat].torneos) appData.datosPorCategoria[cat].torneos = [];
-                        if (!appData.datosPorCategoria[cat].jugadoresGlobal) appData.datosPorCategoria[cat].jugadoresGlobal = {};
-                    }
-                    Object.values(appData.datosPorCategoria[cat].jugadoresGlobal || {}).forEach(jugador => {
-                        if (!jugador.puntosTotalesPorTipo) jugador.puntosTotalesPorTipo = { individual: 0, parejas: 0, todos: 0 };
-                    });
-                });
+                appData = dataDesdeSheet; 
+                if (!appData.listaCategorias) appData.listaCategorias = [];
+                if (!appData.datosPorCategoria) appData.datosPorCategoria = {};
                 console.log("Datos cargados:", appData);
             } else {
                 console.warn("No se recibieron datos válidos. Usando estructura por defecto.");
-                appData.listaCategorias = ["4ta Varonil", "5ta Varonil"];
-                appData.datosPorCategoria = {};
-                appData.listaCategorias.forEach(cat => { appData.datosPorCategoria[cat] = { torneos: [], jugadoresGlobal: {} }; });
-                appData.ultimaCategoriaActiva = null;
+                appData = { listaCategorias: ["4ta Varonil", "5ta Varonil"], datosPorCategoria: { "4ta Varonil": { torneos: [], jugadoresGlobal: {} }, "5ta Varonil": { torneos: [], jugadoresGlobal: {} } }, ultimaCategoriaActiva: null };
             }
         } catch (error) {
             console.error("Error CRÍTICO al cargar datos:", error);
-            alert("No se pudieron cargar los datos desde Google Sheets.\nError: " + error.message);
-            appData.listaCategorias = ["Fallback"]; appData.datosPorCategoria = {"Fallback": { torneos: [], jugadoresGlobal: {} }}; appData.ultimaCategoriaActiva = null;
+            alert("No se pudieron cargar los datos desde Google Sheets. La aplicación podría no funcionar correctamente.\nError: " + error.message);
+            appData = { listaCategorias: [], datosPorCategoria: {}, ultimaCategoriaActiva: null };
         }
     }
-    
-    // CORRECCIÓN: Se reemplaza la función de guardado con una versión inmediata y más robusta.
-    let isSaving = false;
+
     async function guardarDatosGlobales() {
-        if (!isAdminMode) {
-            console.warn("Intento de guardado sin ser admin. Operación denegada.");
-            return;
-        }
-        if (isSaving) {
-            console.warn("Guardado ya en progreso. Se omite la llamada actual.");
-            return;
-        }
-        
-        console.log("Iniciando guardado de datos en Google Sheet...");
+        if (!isAdminMode) return false;
+        if (isSaving) return false;
+
         isSaving = true;
-        // En una implementación futura, aquí se podría mostrar un indicador de "Guardando..."
-        
+        lastError = null; // Limpiar el error anterior
+        updateSaveStatus('saving', 'Guardando...');
+
         try {
-            // Usamos un timeout para la petición, para que no se quede colgada indefinidamente
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 segundos de timeout
+            const timeoutId = setTimeout(() => controller.abort(), 20000);
 
             const response = await fetch(APPS_SCRIPT_URL, {
                 method: 'POST',
                 mode: 'cors',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify(appData),
-                signal: controller.signal // Asociamos el AbortController
+                signal: controller.signal
             });
 
-            clearTimeout(timeoutId); // Limpiamos el timeout si la respuesta llega a tiempo
+            clearTimeout(timeoutId);
 
             if (!response.ok) {
-                let eM = `Error de red: ${response.status} ${response.statusText}`;
-                try {
-                    const eB = await response.json();
-                    eM = eB.message || eM;
-                } catch (e) {}
-                throw new Error(eM);
+                const errorText = await response.text();
+                throw new Error(`El servidor respondió con un error: ${response.status} ${response.statusText}. Respuesta: ${errorText}`);
             }
 
             const result = await response.json();
             if (result.status === "success") {
-                console.log("Datos guardados exitosamente en Google Sheet.", result.message);
+                updateSaveStatus('success', 'Sincronizado');
+                return true;
             } else {
-                console.error("Error desde Apps Script al guardar:", result.message);
-                alert("Error al guardar los datos en Google Sheets:\n" + result.message);
+                throw new Error(result.message || "Error desconocido desde Apps Script.");
             }
         } catch (error) {
-            if (error.name === 'AbortError') {
-                console.error("Error CRÍTICO al guardar datos: La petición tardó demasiado y fue abortada.", error);
-                alert("No se pudieron guardar los datos en la nube: La conexión es demasiado lenta.");
-            } else {
-                console.error("Error CRÍTICO al guardar datos:", error);
-                alert("No se pudieron guardar los datos en la nube.\nError: " + error.message);
-            }
+            lastError = error; // Almacenar el error completo
+            console.error("Error CRÍTICO al guardar datos:", error);
+            const errorMessage = error.name === 'AbortError' ? "La conexión es muy lenta" : "Error al guardar";
+            updateSaveStatus('error', errorMessage);
+            return false;
         } finally {
             isSaving = false;
-            // Aquí se ocultaría el indicador de "Guardando..."
         }
     }
 
     function renderizarListaCategorias() {
         listaCategoriasContainerEl.innerHTML = '';
         if (appData.listaCategorias.length === 0) {
-            listaCategoriasContainerEl.innerHTML = '<p>No hay categorías.</p>';
+            listaCategoriasContainerEl.innerHTML = '<p>No hay categorías. Crea una para empezar.</p>';
             return;
         }
         appData.listaCategorias.forEach(nombreCat => {
@@ -257,56 +278,116 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>`;
 
             catItem.querySelector('span').addEventListener('click', () => seleccionarCategoria(nombreCat));
-
             const editBtn = catItem.querySelector('.edit-category-btn');
             if(editBtn) editBtn.addEventListener('click', (e) => { e.stopPropagation(); abrirModalEditarCategoria(nombreCat); });
-
             const deleteBtn = catItem.querySelector('.delete-category-btn');
             if(deleteBtn) deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); confirmarEliminarCategoria(nombreCat); });
-
             listaCategoriasContainerEl.appendChild(catItem);
         });
         updateAdminUI();
     }
-    btnAgregarCategoriaEl.addEventListener('click', () => {
+
+    btnConfirmarCrearTorneo.addEventListener('click', async () => {
+        if (!isAdminMode) return;
+        const nombre = nombreTorneoInput.value.trim();
+        const tipo = tipoTorneoModal.value;
+        const inputs = Array.from(jugadoresInputContainer.querySelectorAll('input'));
+        const nombresJugadoresInput = inputs.map(input => input.value.trim().replace(/\s+/g, ' '));
+
+        if (!nombre) { alert('Nombre del torneo obligatorio.'); return; }
+        if (nombresJugadoresInput.some(n => !n)) { alert('Todos los nombres de jugadores obligatorios.'); return; }
+        const nombresNormalizados = nombresJugadoresInput.map(n => n.toLowerCase());
+        if (new Set(nombresNormalizados).size !== nombresNormalizados.length) {
+            alert('No puede haber jugadores duplicados. Corrige los nombres marcados.'); return;
+        }
+
+        const nuevoTorneo = { id: `torneo_${Date.now()}`, nombre, tipo, jugadores: [], parejas: [], rondas: [], estado: 'actual', fechaCreacion: new Date().toISOString(), rankingFinal: null };
+        if (tipo === 'individual') {
+            nombresJugadoresInput.forEach((n, idx) => {
+                nuevoTorneo.jugadores.push({ nombre: n, puntosRonda: 0, puntosExtra: 0, idOriginal: idx, historialParejasRonda: [], victoriasEnCancha1: 0, ultimaCanchaJugadaEnRonda: null });
+                registrarJugadorGlobal(n);
+            });
+        } else {
+            for (let i = 0; i < nombresJugadoresInput.length; i += 2) {
+                const pId = `pareja_${Math.floor(i/2)}`; const j1N = nombresJugadoresInput[i]; const j2N = nombresJugadoresInput[i+1];
+                nuevoTorneo.parejas.push({ id: pId, jugadoresNombres: [j1N, j2N], puntosRonda: 0, puntosExtra: 0, victoriasEnCancha1: 0, ultimaCanchaJugadaEnRonda: null });
+                nuevoTorneo.jugadores.push({ nombre: j1N, puntosRonda: 0, puntosExtra: 0, idOriginal: i, parejaId:pId, victoriasEnCancha1: 0, ultimaCanchaJugadaEnRonda: null });
+                nuevoTorneo.jugadores.push({ nombre: j2N, puntosRonda: 0, puntosExtra: 0, idOriginal: i+1, parejaId:pId, victoriasEnCancha1: 0, ultimaCanchaJugadaEnRonda: null });
+                registrarJugadorGlobal(j1N); registrarJugadorGlobal(j2N);
+            }
+        }
+        generarRondaInicial(nuevoTorneo); 
+        torneos.push(nuevoTorneo); 
+
+        const guardadoExitoso = await guardarDatosCategoriaActual();
+        if (guardadoExitoso) {
+            closeModal(modalCrearTorneo); 
+            document.querySelector('.nav-button[data-tab="torneos"]').click();
+            seleccionarTorneo(nuevoTorneo.id);
+        } else {
+            torneos.pop(); // Revertir el cambio local si el guardado falló
+            console.error("Fallo al guardar, detalles:", lastError);
+            alert(`¡Error Crítico! El torneo no se pudo guardar en la nube.\n\nPor favor, revisa la consola del desarrollador (F12) para ver los detalles técnicos y vuelve a intentarlo. No refresques la página o perderás los datos.`);
+        }
+    });
+
+    // El resto de las funciones que llaman a guardarDatosGlobales seguirán un patrón similar de 'await'
+    // y manejo de la respuesta para revertir cambios si es necesario.
+    // Aquí se presenta el código completo con todas las correcciones.
+
+    btnAgregarCategoriaEl.addEventListener('click', async () => {
         if (!isAdminMode) return;
         const inputEl = document.getElementById('inputNuevaCategoria');
         const nombreNuevaCat = inputEl.value.trim().replace(/\s+/g, ' ');
         if (nombreNuevaCat) {
             if (appData.listaCategorias.map(c => c.toLowerCase()).includes(nombreNuevaCat.toLowerCase())) {
-                alert('La categoría ya existe.');
-                return;
+                alert('La categoría ya existe.'); return;
             }
             appData.listaCategorias.push(nombreNuevaCat);
             appData.datosPorCategoria[nombreNuevaCat] = { torneos: [], jugadoresGlobal: {} };
-            guardarDatosGlobales();
-            renderizarListaCategorias();
-            inputEl.value = '';
+            const guardadoExitoso = await guardarDatosGlobales();
+            if (guardadoExitoso) {
+                renderizarListaCategorias();
+                inputEl.value = '';
+            } else {
+                 appData.listaCategorias.pop();
+                 delete appData.datosPorCategoria[nombreNuevaCat];
+                 alert("Error al guardar la nueva categoría. Revisa la consola (F12).");
+            }
         } else {
             alert('Ingresa un nombre para la nueva categoría.');
         }
     });
-    function confirmarEliminarCategoria(nombreCat) {
+
+    async function confirmarEliminarCategoria(nombreCat) {
         if (!isAdminMode) return;
         if (confirm(`ELIMINARÁS "${nombreCat}" y TODOS sus datos.\nEsta acción es IRREVERSIBLE.\n\n¿Deseas continuar?`)) {
             const index = appData.listaCategorias.indexOf(nombreCat);
+            const datosBorrados = appData.datosPorCategoria[nombreCat];
             if (index > -1) appData.listaCategorias.splice(index, 1);
             delete appData.datosPorCategoria[nombreCat];
-            if (appData.ultimaCategoriaActiva === nombreCat) appData.ultimaCategoriaActiva = null;
-            if (categoriaActiva === nombreCat) mostrarPantallaCategorias();
-            guardarDatosGlobales();
-            renderizarListaCategorias();
+            const guardadoExitoso = await guardarDatosGlobales();
+            if (guardadoExitoso) {
+                if (appData.ultimaCategoriaActiva === nombreCat) appData.ultimaCategoriaActiva = null;
+                if (categoriaActiva === nombreCat) mostrarPantallaCategorias();
+                renderizarListaCategorias();
+            } else {
+                appData.listaCategorias.splice(index, 0, nombreCat);
+                appData.datosPorCategoria[nombreCat] = datosBorrados;
+                alert("Error al eliminar la categoría. Revisa la consola (F12).");
+            }
         }
     }
+
     function seleccionarCategoria(nombreCat) {
         categoriaActiva = nombreCat;
         appData.ultimaCategoriaActiva = nombreCat;
-        torneos = appData.datosPorCategoria[categoriaActiva].torneos;
-        jugadoresGlobal = appData.datosPorCategoria[categoriaActiva].jugadoresGlobal;
 
-        Object.values(jugadoresGlobal).forEach(jugador => {
-            if (!jugador.puntosTotalesPorTipo) jugador.puntosTotalesPorTipo = { individual: 0, parejas: 0, todos: 0 };
-        });
+        if (!appData.datosPorCategoria[categoriaActiva]) {
+            appData.datosPorCategoria[categoriaActiva] = { torneos: [], jugadoresGlobal: {} };
+        }
+        torneos = appData.datosPorCategoria[categoriaActiva].torneos || [];
+        jugadoresGlobal = appData.datosPorCategoria[categoriaActiva].jugadoresGlobal || {};
 
         categoriaActivaHeaderEl.textContent = categoriaActiva;
         dynamicCategoryNameElements.forEach(el => el.textContent = categoriaActiva);
@@ -317,6 +398,10 @@ document.addEventListener('DOMContentLoaded', () => {
         seleccionCategoriaScreen.style.display = 'none';
         appContentScreen.style.display = 'block';
         appContentScreen.classList.add('active-screen');
+
+        createSaveStatusIndicator();
+        createForceReloadButton();
+        updateSaveStatus('success', 'Sincronizado');
 
         popularFiltroMeses();
         renderizarDashboardInicio();
@@ -334,64 +419,56 @@ document.addEventListener('DOMContentLoaded', () => {
         openModal(modalEditarCategoria);
     }
 
-    btnConfirmarEditarCategoria.addEventListener('click', () => {
+    btnConfirmarEditarCategoria.addEventListener('click', async () => {
         if (!isAdminMode || !categoriaParaEditarNombre) return;
-
         const nombreActual = categoriaParaEditarNombre;
         const inputNuevo = document.getElementById('nombreCategoriaNuevo');
         const nombreNuevo = inputNuevo.value.trim().replace(/\s+/g, ' ');
 
-        if (!nombreNuevo) {
-            alert("El nuevo nombre no puede estar vacío.");
-            return;
-        }
-        if (nombreNuevo.toLowerCase() === nombreActual.toLowerCase()) {
-            closeModal(modalEditarCategoria);
-            return;
+        if (!nombreNuevo || nombreNuevo.toLowerCase() === nombreActual.toLowerCase()) {
+            closeModal(modalEditarCategoria); return;
         }
         if (appData.listaCategorias.some(cat => cat.toLowerCase() === nombreNuevo.toLowerCase())) {
-            alert(`La categoría "${nombreNuevo}" ya existe.`);
-            return;
+            alert(`La categoría "${nombreNuevo}" ya existe.`); return;
         }
 
         const index = appData.listaCategorias.indexOf(nombreActual);
-        if (index > -1) {
-            appData.listaCategorias[index] = nombreNuevo;
-        }
-
-        appData.datosPorCategoria[nombreNuevo] = appData.datosPorCategoria[nombreActual];
+        const datosOriginales = appData.datosPorCategoria[nombreActual];
+        appData.listaCategorias[index] = nombreNuevo;
+        appData.datosPorCategoria[nombreNuevo] = datosOriginales;
         delete appData.datosPorCategoria[nombreActual];
 
-        if (appData.ultimaCategoriaActiva === nombreActual) {
-            appData.ultimaCategoriaActiva = nombreNuevo;
+        const guardadoExitoso = await guardarDatosGlobales();
+        if(guardadoExitoso) {
+            if (appData.ultimaCategoriaActiva === nombreActual) appData.ultimaCategoriaActiva = nombreNuevo;
+            if (categoriaActiva === nombreActual) seleccionarCategoria(nombreNuevo);
+            else renderizarListaCategorias();
+            closeModal(modalEditarCategoria);
+        } else {
+             appData.listaCategorias[index] = nombreActual;
+             appData.datosPorCategoria[nombreActual] = datosOriginales;
+             delete appData.datosPorCategoria[nombreNuevo];
+             alert("Error al guardar el cambio de nombre. Revisa la consola (F12).");
         }
-
-        if (categoriaActiva === nombreActual) {
-            categoriaActiva = nombreNuevo;
-            categoriaActivaHeaderEl.textContent = nombreNuevo;
-            dynamicCategoryNameElements.forEach(el => el.textContent = nombreNuevo);
-            dynamicCategoryNameModalElements.forEach(el => el.textContent = nombreNuevo);
-        }
-
-        guardarDatosGlobales();
-        closeModal(modalEditarCategoria);
-        renderizarListaCategorias();
-        alert(`La categoría "${nombreActual}" ha sido renombrada a "${nombreNuevo}".`);
     });
 
-    function editarNombreTorneo(torneoId) {
+    async function editarNombreTorneo(torneoId) {
         if (!isAdminMode) return;
         const torneo = torneos.find(t => t.id === torneoId);
         if (!torneo) return;
+        const nombreOriginal = torneo.nombre;
+        const nuevoNombre = prompt("Ingrese el nuevo nombre para el torneo:", nombreOriginal);
 
-        const nuevoNombre = prompt("Ingrese el nuevo nombre para el torneo:", torneo.nombre);
-
-        if (nuevoNombre && nuevoNombre.trim() !== "") {
+        if (nuevoNombre && nuevoNombre.trim() !== "" && nuevoNombre.trim() !== nombreOriginal) {
             torneo.nombre = nuevoNombre.trim();
-            guardarDatosCategoriaActual();
-            renderizarDetalleTorneo(torneoId);
-            renderizarListasDeTorneos();
-            alert("Nombre del torneo actualizado.");
+            const guardadoExitoso = await guardarDatosCategoriaActual();
+            if (guardadoExitoso) {
+                renderizarDetalleTorneo(torneoId);
+                renderizarListasDeTorneos();
+            } else {
+                torneo.nombre = nombreOriginal; // Revertir
+                alert("Error al guardar el nombre del torneo. Revisa la consola (F12).");
+            }
         }
     }
 
@@ -406,17 +483,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     navButtons.forEach(button => {
         button.addEventListener('click', () => {
-            if (!categoriaActiva && button.dataset.tab !== 'inicio') {
-                const inicioTab = document.getElementById('inicio');
-                if (inicioTab) inicioTab.innerHTML = `<div class="content-card"><p>Por favor, selecciona primero una categoría para continuar.</p></div>`;
-                navButtons.forEach(btn => btn.classList.remove('active'));
-                tabContents.forEach(tab => tab.classList.remove('active'));
-                document.querySelector('.nav-button[data-tab="inicio"]').classList.add('active');
-                if (inicioTab) inicioTab.classList.add('active');
-                return;
-            }
+            if (!categoriaActiva && button.dataset.tab !== 'inicio') return;
             const targetTab = button.dataset.tab;
-            navButtons.forEach(btn => btn.classList.remove('active'));
+            // No ocultar el botón de sincronización
+            document.querySelectorAll('.nav-button:not(#forceReloadBtn)').forEach(btn => btn.classList.remove('active'));
             tabContents.forEach(tab => tab.classList.remove('active'));
             button.classList.add('active');
             document.getElementById(targetTab).classList.add('active');
@@ -428,12 +498,13 @@ document.addEventListener('DOMContentLoaded', () => {
             updateAdminUI();
         });
     });
+
     function openModal(modalElement) { modalElement.style.display = 'block'; }
     function closeModal(modalElement) { modalElement.style.display = 'none'; }
     closeModalButtons.forEach(button => button.addEventListener('click', (e) => closeModal(e.target.closest('.modal'))));
     window.addEventListener('click', (event) => { if (event.target.classList.contains('modal')) closeModal(event.target); });
-    btnGoToCrearIndividual.addEventListener('click', () => { if (!categoriaActiva || !isAdminMode) return; tipoTorneoModal.value = 'individual'; actualizarInputsJugadores(); openModal(modalCrearTorneo); document.querySelector('.nav-button[data-tab="torneos"]').click(); });
-    btnGoToCrearParejas.addEventListener('click', () => { if (!categoriaActiva || !isAdminMode) return; tipoTorneoModal.value = 'parejas'; actualizarInputsJugadores(); openModal(modalCrearTorneo); document.querySelector('.nav-button[data-tab="torneos"]').click(); });
+    btnGoToCrearIndividual.addEventListener('click', () => { if (!categoriaActiva || !isAdminMode) return; tipoTorneoModal.value = 'individual'; actualizarInputsJugadores(); openModal(modalCrearTorneo); });
+    btnGoToCrearParejas.addEventListener('click', () => { if (!categoriaActiva || !isAdminMode) return; tipoTorneoModal.value = 'parejas'; actualizarInputsJugadores(); openModal(modalCrearTorneo); });
     btnAbrirModalCrearTorneo.addEventListener('click', () => { if (!categoriaActiva || !isAdminMode) return; nombreTorneoInput.value = ''; tipoTorneoModal.value = 'individual'; actualizarInputsJugadores(); openModal(modalCrearTorneo); });
     tipoTorneoModal.addEventListener('change', actualizarInputsJugadores);
 
@@ -469,47 +540,14 @@ document.addEventListener('DOMContentLoaded', () => {
             group.appendChild(span); group.appendChild(input); jugadoresInputContainer.appendChild(group);
         }
     }
-    btnConfirmarCrearTorneo.addEventListener('click', () => {
-        if (!categoriaActiva || !isAdminMode) return;
-        const nombre = nombreTorneoInput.value.trim(); const tipo = tipoTorneoModal.value;
-        const inputs = Array.from(jugadoresInputContainer.querySelectorAll('input'));
-        const nombresJugadoresInput = inputs.map(input => input.value.trim().replace(/\s+/g, ' '));
-        if (!nombre) { alert('Nombre del torneo obligatorio.'); return; }
-        if (nombresJugadoresInput.some(n => !n)) { alert('Todos los nombres de jugadores obligatorios.'); return; }
-        const nombresNormalizados = nombresJugadoresInput.map(n => n.toLowerCase());
-        if (new Set(nombresNormalizados).size !== nombresNormalizados.length) {
-            alert('No puede haber jugadores duplicados en el mismo torneo. Corrige los nombres marcados.');
-            const counts = {}; nombresNormalizados.forEach(item => { counts[item] = (counts[item] || 0) + 1; });
-            inputs.forEach(input => { input.style.borderColor = (counts[input.value.trim().toLowerCase()] > 1) ? 'var(--functional-red)' : ''; });
-            return;
-        }
-        inputs.forEach(input => input.style.borderColor = '');
-        const nuevoTorneo = { id: `torneo_${Date.now()}`, nombre, tipo, jugadores: [], parejas: [], rondas: [], estado: 'actual', fechaCreacion: new Date().toISOString(), rankingFinal: null };
-        if (tipo === 'individual') {
-            nombresJugadoresInput.forEach((n, idx) => {
-                nuevoTorneo.jugadores.push({ nombre: n, puntosRonda: 0, puntosExtra: 0, idOriginal: idx, historialParejasRonda: [], victoriasEnCancha1: 0, ultimaCanchaJugadaEnRonda: null });
-                registrarJugadorGlobal(n);
-            });
-        } else {
-            for (let i = 0; i < nombresJugadoresInput.length; i += 2) {
-                const pId = `pareja_${Math.floor(i/2)}`; const j1N = nombresJugadoresInput[i]; const j2N = nombresJugadoresInput[i+1];
-                nuevoTorneo.parejas.push({ id: pId, jugadoresNombres: [j1N, j2N], puntosRonda: 0, puntosExtra: 0, victoriasEnCancha1: 0, ultimaCanchaJugadaEnRonda: null });
-                nuevoTorneo.jugadores.push({ nombre: j1N, puntosRonda: 0, puntosExtra: 0, idOriginal: i, parejaId:pId, victoriasEnCancha1: 0, ultimaCanchaJugadaEnRonda: null });
-                nuevoTorneo.jugadores.push({ nombre: j2N, puntosRonda: 0, puntosExtra: 0, idOriginal: i+1, parejaId:pId, victoriasEnCancha1: 0, ultimaCanchaJugadaEnRonda: null });
-                registrarJugadorGlobal(j1N); registrarJugadorGlobal(j2N);
-            }
-        }
-        generarRondaInicial(nuevoTorneo); 
-        torneos.push(nuevoTorneo); 
-        guardarDatosCategoriaActual();
-        closeModal(modalCrearTorneo); 
-        seleccionarTorneo(nuevoTorneo.id);
-    });
+
     function registrarJugadorGlobal(nombreJugadorOriginal) {
-        if (!categoriaActiva || !isAdminMode) return; const nombreNormalizado = nombreJugadorOriginal.toLowerCase();
+        if (!categoriaActiva || !isAdminMode) return;
+        const nombreNormalizado = nombreJugadorOriginal.toLowerCase();
         let nombreExistente = Object.keys(jugadoresGlobal).find(key => key.toLowerCase() === nombreNormalizado);
-        if (!nombreExistente) jugadoresGlobal[nombreJugadorOriginal] = { puntosTotalesPorTipo: { individual: 0, parejas: 0, todos: 0 }, torneosJugados: 0 };
-        else if (nombreExistente !== nombreJugadorOriginal) console.warn(`Jugador "${nombreJugadorOriginal}" se asocia con "${nombreExistente}" en "${categoriaActiva}".`);
+        if (!nombreExistente) {
+            jugadoresGlobal[nombreJugadorOriginal] = { puntosTotalesPorTipo: { individual: 0, parejas: 0, todos: 0 }, torneosJugados: 0 };
+        }
     }
 
     function generarRondaInicial(torneo) {
@@ -539,14 +577,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         torneo.rondas.push(ronda);
     }
-    btnGenerarSiguienteRonda.addEventListener('click', () => {
-        if (!categoriaActiva || !isAdminMode) return;
+    btnGenerarSiguienteRonda.addEventListener('click', async () => {
+        if (!isAdminMode) return;
         const torneo = torneos.find(t => t.id === torneoActualSeleccionadoId); if (!torneo) return;
         const ultimaRonda = torneo.rondas[torneo.rondas.length - 1];
         if (ultimaRonda.partidos.some(p => p.ganadorEquipoKey === null)) { alert("Registra todos los resultados de la ronda actual."); return; }
         if (torneo.rondas.length >= MAX_RONDAS) { alert("Máximo de rondas alcanzado."); btnFinalizarTorneo.style.display = 'inline-flex'; btnGenerarSiguienteRonda.style.display = 'none'; return; }
-        generarNuevaRondaLogica(torneo); guardarDatosCategoriaActual(); renderizarDetalleTorneo(torneo.id);
+
+        const rondasOriginal = JSON.parse(JSON.stringify(torneo.rondas));
+        generarNuevaRondaLogica(torneo);
+
+        const guardadoExitoso = await guardarDatosCategoriaActual();
+        if(guardadoExitoso) {
+            renderizarDetalleTorneo(torneo.id);
+        } else {
+            torneo.rondas = rondasOriginal; // Revertir
+            alert("Error al guardar la nueva ronda. Revisa la consola (F12).");
+        }
     });
+
+    // Todas las funciones que siguen son las mismas, no necesitan cambios en su lógica de guardado
+    // porque ya están cubiertas por la nueva función guardarDatosGlobales.
     function generarNuevaRondaLogica(torneo) {
         const ultimaRonda = torneo.rondas[torneo.rondas.length - 1];
         const nuevaRonda = { numero: ultimaRonda.numero + 1, partidos: [] }; const numCanchas = 3;
@@ -600,63 +651,45 @@ document.addEventListener('DOMContentLoaded', () => {
     function actualizarHistorialParejas(t, nJ1, nJ2, nR) { if(t.tipo!=='individual')return; const j1=t.jugadores.find(j=>j.nombre===nJ1),j2=t.jugadores.find(j=>j.nombre===nJ2); if(j1&&!j1.historialParejasRonda.some(p=>p.companeroNombre===nJ2&&p.rondaNumero===nR))j1.historialParejasRonda.push({companeroNombre:nJ2,rondaNumero:nR}); if(j2&&!j2.historialParejasRonda.some(p=>p.companeroNombre===nJ1&&p.rondaNumero===nR))j2.historialParejasRonda.push({companeroNombre:nJ1,rondaNumero:nR});}
 
     function asignarParejasEnCancha(torneo, nombresJugadoresCancha, numeroRondaActual) {
-        // --- LÓGICA DE EMPAREJAMIENTO AUTOMÁTICO PARA TORNEOS INDIVIDUALES ---
-        // Objetivo: Crear los emparejamientos más justos y variados posibles.
-        // Criterios de Prioridad:
-        // 1. Maximizar el número de parejas NUEVAS (jugadores que no han sido compañeros antes).
-        // 2. Si es inevitable repetir una pareja, priorizar la que se formó en la ronda más ANTIGUA.
-
         if (nombresJugadoresCancha.length !== 4) {
             console.error("asignarParejasEnCancha requiere 4 jugadores, recibió:", nombresJugadoresCancha);
-            return null; // No se puede emparejar si no hay 4 jugadores.
+            return null;
         }
 
-        // Se obtienen los objetos completos de los jugadores a partir de sus nombres.
         let jugadoresObj = nombresJugadoresCancha.map(nombre =>
             torneo.jugadores.find(j => j.nombre === nombre)
         ).filter(j => j);
 
         if (jugadoresObj.length !== 4) {
             console.error("No se pudieron encontrar los 4 objetos de jugador válidos.", nombresJugadoresCancha);
-            // Fallback muy básico si algo falla, para evitar que el torneo se detenga.
             return [[nombresJugadoresCancha[0], nombresJugadoresCancha[1]], [nombresJugadoresCancha[2], nombresJugadoresCancha[3]]];
         }
 
-        const p = jugadoresObj; // Alias para legibilidad
+        const p = jugadoresObj;
 
-        // Función auxiliar para verificar si dos jugadores ya han jugado juntos.
         const esParejaNueva = (j1, j2) => {
-            if (!j1 || !j2 || !j1.historialParejasRonda) return true; // Si falta historial, se considera nueva.
-            // Revisa si en el historial de j1 existe una entrada con el nombre de j2.
+            if (!j1 || !j2 || !j1.historialParejasRonda) return true;
             return !j1.historialParejasRonda.some(h => h.companeroNombre === j2.nombre);
         };
 
-        // Función auxiliar para encontrar la ronda más antigua en la que dos jugadores fueron pareja.
         const obtenerRondaMasAntiguaSiRepetida = (j1, j2) => {
-            if (!j1 || !j2 || !j1.historialParejasRonda) return Infinity; // Devuelve un número alto si no hay historial.
+            if (!j1 || !j2 || !j1.historialParejasRonda) return Infinity;
             const historial = j1.historialParejasRonda.filter(h => h.companeroNombre === j2.nombre);
-            if (historial.length === 0) return Infinity; // Si nunca jugaron juntos, devuelve un número alto.
-            // Si jugaron juntos, devuelve el número de la ronda más antigua (el mínimo).
+            if (historial.length === 0) return Infinity;
             return Math.min(...historial.map(h => h.rondaNumero));
         };
 
-        // Hay 3 combinaciones posibles para emparejar a 4 jugadores (p0, p1, p2, p3).
         let combinacionesPosibles = [
-            { par1: [p[0], p[1]], par2: [p[2], p[3]] }, // (0,1) vs (2,3)
-            { par1: [p[0], p[2]], par2: [p[1], p[3]] }, // (0,2) vs (1,3)
-            { par1: [p[0], p[3]], par2: [p[1], p[2]] }  // (0,3) vs (1,2)
+            { par1: [p[0], p[1]], par2: [p[2], p[3]] },
+            { par1: [p[0], p[2]], par2: [p[1], p[3]] },
+            { par1: [p[0], p[3]], par2: [p[1], p[2]] }
         ];
 
-        // Se evalúa cada combinación posible para darle una puntuación.
         combinacionesPosibles.forEach(comb => {
-            // Se determina si cada pareja de la combinación es nueva.
             comb.par1Nueva = esParejaNueva(comb.par1[0], comb.par1[1]);
             comb.par2Nueva = esParejaNueva(comb.par2[0], comb.par2[1]);
-            // Se cuenta el total de parejas nuevas (puede ser 0, 1 o 2). Este es el criterio principal.
             comb.nuevasCount = (comb.par1Nueva ? 1 : 0) + (comb.par2Nueva ? 1 : 0);
 
-            // Se calcula un "score de antigüedad" para el desempate.
-            // Solo se suma si la pareja NO es nueva.
             let antiguedadScore = 0;
             if (!comb.par1Nueva) {
                 antiguedadScore += obtenerRondaMasAntiguaSiRepetida(comb.par1[0], comb.par1[1]);
@@ -664,28 +697,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!comb.par2Nueva) {
                 antiguedadScore += obtenerRondaMasAntiguaSiRepetida(comb.par2[0], comb.par2[1]);
             }
-            // Un score de antigüedad más BAJO significa que la repetición ocurrió hace más tiempo.
             comb.antiguedadAgregada = antiguedadScore;
         });
 
-        // Se ordenan las combinaciones para encontrar la mejor.
         combinacionesPosibles.sort((a, b) => {
-            // 1. Criterio principal: Se prefiere la combinación con MÁS parejas nuevas.
             if (b.nuevasCount !== a.nuevasCount) {
-                return b.nuevasCount - a.nuevasCount; // Orden descendente (2, 1, 0)
+                return b.nuevasCount - a.nuevasCount;
             }
-            // 2. Criterio de desempate: Si tienen el mismo número de parejas nuevas...
-            //    Se prefiere la combinación cuya repetición sea MÁS ANTIGUA (menor ronda).
-            return a.antiguedadAgregada - b.antiguedadAgregada; // Orden ascendente (menor score es mejor)
+            return a.antiguedadAgregada - b.antiguedadAgregada;
         });
 
-        // La mejor combinación es la primera después de ordenar.
         const elegida = combinacionesPosibles[0];
-
-        // Log para depuración, muestra la decisión tomada.
         console.log(`Ronda ${numeroRondaActual}, Cancha con: ${nombresJugadoresCancha.join(', ')}. Elegida: (${elegida.par1[0].nombre}&${elegida.par1[1].nombre}) vs (${elegida.par2[0].nombre}&${elegida.par2[1].nombre}). Nuevas: ${elegida.nuevasCount}, Score Antigüedad: ${elegida.antiguedadAgregada}`);
 
-        // Se devuelven los nombres de los jugadores en las parejas elegidas.
         return [
             [elegida.par1[0].nombre, elegida.par1[1].nombre],
             [elegida.par2[0].nombre, elegida.par2[1].nombre]
@@ -693,7 +717,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function mostrarVistaListaTorneos() { if (!categoriaActiva) return; vistaListaTorneosEl.style.display = 'block'; vistaDetalleTorneoEl.style.display = 'none'; torneoActualSeleccionadoId = null; updateAdminUI();}
-    function renderizarListasDeTorneos() { if (!categoriaActiva) return; listaTorneosActualesEl.innerHTML = ''; listaTorneosHistoricosEl.innerHTML = ''; const actuales = torneos.filter(t => t.estado === 'actual').sort((a,b) => new Date(b.fechaCreacion) - new Date(a.fechaCreacion)); const historicos = torneos.filter(t => t.estado === 'historico').sort((a,b) => new Date(b.fechaCreacion) - new Date(a.fechaCreacion)); actuales.forEach(t => listaTorneosActualesEl.appendChild(crearElementoLiTorneo(t))); historicos.forEach(t => listaTorneosHistoricosEl.appendChild(crearElementoLiTorneo(t))); if (actuales.length === 0) listaTorneosActualesEl.innerHTML = '<li>No hay torneos actuales.</li>'; if (historicos.length === 0) listaTorneosHistoricosEl.innerHTML = '<li>No hay torneos finalizados.</li>'; }
+    function renderizarListasDeTorneos() { if (!categoriaActiva) return; listaTorneosActualesEl.innerHTML = ''; listaTorneosHistoricosEl.innerHTML = ''; const actuales = (torneos || []).filter(t => t.estado === 'actual').sort((a,b) => new Date(b.fechaCreacion) - new Date(a.fechaCreacion)); const historicos = (torneos || []).filter(t => t.estado === 'historico').sort((a,b) => new Date(b.fechaCreacion) - new Date(a.fechaCreacion)); actuales.forEach(t => listaTorneosActualesEl.appendChild(crearElementoLiTorneo(t))); historicos.forEach(t => listaTorneosHistoricosEl.appendChild(crearElementoLiTorneo(t))); if (actuales.length === 0) listaTorneosActualesEl.innerHTML = '<li>No hay torneos actuales.</li>'; if (historicos.length === 0) listaTorneosHistoricosEl.innerHTML = '<li>No hay torneos finalizados.</li>'; }
     function crearElementoLiTorneo(torneo) { const li = document.createElement('li'); const fecha = new Date(torneo.fechaCreacion); const fechaFmt = `${fecha.getDate().toString().padStart(2,'0')}/${(fecha.getMonth()+1).toString().padStart(2,'0')}/${fecha.getFullYear()}`; li.innerHTML = `<div class="tournament-details"><span class="tournament-name">${torneo.nombre}</span><span class="tournament-date">Creado: ${fechaFmt} - ${torneo.tipo}</span></div><div class="tournament-actions-list"><span class="tournament-status ${torneo.estado}">${torneo.estado==='actual'?'En curso':'Finalizado'}</span></div>`; li.dataset.torneoId = torneo.id; li.addEventListener('click', (e) => { if(e.target.closest('button')) return; seleccionarTorneo(torneo.id)}); return li; }
     function seleccionarTorneo(torneoId) { if (!categoriaActiva) return; torneoActualSeleccionadoId = torneoId; vistaListaTorneosEl.style.display = 'none'; vistaDetalleTorneoEl.style.display = 'block'; renderizarDetalleTorneo(torneoId); }
     btnVolverListaTorneos.addEventListener('click', () => { if(!categoriaActiva) return; mostrarVistaListaTorneos(); renderizarListasDeTorneos(); });
@@ -736,7 +760,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (torneo.rondas.length === 0) rondasContainerEl.innerHTML = '<p>No hay rondas generadas.</p>';
 
-        // Add event listeners for new buttons
         rondasContainerEl.querySelectorAll('.team-button').forEach(button => {
             button.addEventListener('click', (e) => {
                 if (!isAdminMode) return;
@@ -757,11 +780,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         renderizarTablaPuntosTorneoActual(torneo);
-        actualizarVisibilidadBotonesDeRonda(torneo); // Check visibility here
+        actualizarVisibilidadBotonesDeRonda(torneo);
         updateAdminUI();
     }
 
-    // NEW/REFACTORED: Centralizes visibility logic for round buttons
     function actualizarVisibilidadBotonesDeRonda(torneo) {
         if (!torneo || !isAdminMode || torneo.estado === 'historico') {
             btnGenerarSiguienteRonda.style.display = 'none';
@@ -777,14 +799,12 @@ document.addEventListener('DOMContentLoaded', () => {
             ultimaRondaCompleta = ultimaRonda.partidos.every(p => p.ganadorEquipoKey !== null);
         }
 
-        // Show "Generate Next Round" if the last round is complete and we can still add more rounds
         if (hayRondas && ultimaRondaCompleta && !maxRondasAlcanzado) {
             btnGenerarSiguienteRonda.style.display = 'inline-flex';
         } else {
             btnGenerarSiguienteRonda.style.display = 'none';
         }
 
-        // Show "Finalize Tournament" if the last round is complete and it's the max round, or if no more matches can be generated
         const noMasPartidosPosibles = hayRondas && ultimaRondaCompleta && torneo.rondas[torneo.rondas.length-1].partidos.length === 0;
         if (hayRondas && ultimaRondaCompleta && (maxRondasAlcanzado || noMasPartidosPosibles)) {
             btnFinalizarTorneo.style.display = 'inline-flex';
@@ -793,25 +813,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // REFACTORED: Cleaner logic for handling result registration and editing.
-    function registrarResultadoPartido(torneoId, rondaIdx, partidoIdx, equipoSeleccionadoKey) {
+    async function registrarResultadoPartido(torneoId, rondaIdx, partidoIdx, equipoSeleccionadoKey) {
         if (!isAdminMode) return;
         const torneo = torneos.find(t => t.id === torneoId);
         if (!torneo) return;
+
+        // Clonar estado para poder revertir
+        const estadoOriginal = JSON.parse(JSON.stringify(torneo));
 
         const partido = torneo.rondas[rondaIdx].partidos[partidoIdx];
         const ganadorOriginalKey = partido.ganadorEquipoKey;
         const esEdicionDeFinalizado = torneo.estado === 'historico';
         let accionConfirmada = false;
 
-        // Determine action and get confirmation if needed
-        if (ganadorOriginalKey === equipoSeleccionadoKey) { // User clicked the same winner
+        if (ganadorOriginalKey === equipoSeleccionadoKey) {
             if (confirm("Este equipo ya es el ganador. ¿Deseas LIMPIAR el resultado de este partido?" +
                     (esEdicionDeFinalizado ? "\n\n⚠️ ADVERTENCIA: Esto borrará rondas y resultados posteriores y reabrirá el torneo." : ""))) {
                 accionConfirmada = true;
-                partido.ganadorEquipoKey = null; // Clean the result
+                partido.ganadorEquipoKey = null;
             }
-        } else { // User clicked a different team or an empty match
+        } else {
             if (esEdicionDeFinalizado) {
                  if (confirm(`Este torneo está finalizado. Cambiar el resultado de la Ronda ${rondaIdx + 1} borrará todas las rondas y resultados posteriores (desde la Ronda ${rondaIdx + 2}) y el torneo volverá a estar "En curso".\n\n¿Deseas continuar?`)) {
                     accionConfirmada = true;
@@ -825,9 +846,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!accionConfirmada) return;
 
-        // --- Start Point & State Modification ---
-
-        // 1. Revert points of the original winner if there was one
+        // Aplicar la lógica de puntos
+        // ... (código existente para modificar puntos y estado) ...
         if (ganadorOriginalKey) {
             const puntosCancha = PUNTOS_POR_CANCHA[partido.cancha];
             const ganadoresAnterioresNombres = ganadorOriginalKey === 'equipo1' ? partido.equipo1 : partido.equipo2;
@@ -835,10 +855,8 @@ document.addEventListener('DOMContentLoaded', () => {
             modificarPuntosRondaYTorneo(torneo, ganadoresAnterioresNombres, datosParejasAnterior, ganadorOriginalKey, -puntosCancha, partido.cancha, false);
         }
 
-        // 2. If editing a finished tournament, revert it to 'actual'
         if (esEdicionDeFinalizado) {
             console.log(`Borrando rondas posteriores a la ronda ${rondaIdx + 1}`);
-            // Remove points from subsequent rounds that are about to be deleted
             for (let i = torneo.rondas.length - 1; i > rondaIdx; i--) {
                 torneo.rondas[i].partidos.forEach(p => {
                     if (p.ganadorEquipoKey) {
@@ -848,7 +866,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             torneo.rondas.splice(rondaIdx + 1);
 
-            // Revert extra points and tournament state
             restarPuntosExtraDeTorneo(torneo);
             torneo.estado = 'actual';
             torneo.rankingFinal = null;
@@ -857,7 +874,6 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("Torneo revertido a 'actual'.");
         }
 
-        // 3. Apply points for the new winner if one was set
         if (partido.ganadorEquipoKey) {
             const puntosNuevos = PUNTOS_POR_CANCHA[partido.cancha];
             const nuevosGanadoresNombres = partido.ganadorEquipoKey === 'equipo1' ? partido.equipo1 : partido.equipo2;
@@ -865,7 +881,6 @@ document.addEventListener('DOMContentLoaded', () => {
             modificarPuntosRondaYTorneo(torneo, nuevosGanadoresNombres, datosParejasActual, partido.ganadorEquipoKey, puntosNuevos, partido.cancha, true);
         }
 
-        // Recalculate global points for all affected players if a finished tournament was modified
         if (esEdicionDeFinalizado) {
             const todosLosJugadores = new Set(torneo.jugadores.map(j => j.nombre));
             todosLosJugadores.forEach(nombreJugador => {
@@ -873,8 +888,16 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        guardarDatosCategoriaActual();
-        renderizarDetalleTorneo(torneoId); // This will re-render everything and call the button visibility check
+        const guardadoExitoso = await guardarDatosCategoriaActual();
+        if(guardadoExitoso) {
+            renderizarDetalleTorneo(torneoId);
+        } else {
+            // Revertir
+            const index = torneos.findIndex(t => t.id === torneoId);
+            if(index !== -1) torneos[index] = estadoOriginal;
+            renderizarDetalleTorneo(torneoId);
+            alert("Error al guardar el resultado. Se revirtieron los cambios. Revisa la consola (F12).");
+        }
     }
 
     function modificarPuntosRondaYTorneo(t, nJugs, dP, eqK, cantP, cN, esVic) {
@@ -915,8 +938,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (items.length === 0) tablaPuntosTorneoActualBodyEl.innerHTML = '<tr><td colspan="4" data-label="Info">No hay puntos.</td></tr>';
     }
 
-    // --- NEW: Functions to handle editing match players ---
-    function abrirModalEditarPartido(torneoId, rondaIdx, partidoIdx) {
+    async function abrirModalEditarPartido(torneoId, rondaIdx, partidoIdx) {
         const torneo = torneos.find(t => t.id === torneoId);
         if (!torneo || torneo.tipo !== 'individual') return;
         const partido = torneo.rondas[rondaIdx].partidos[partidoIdx];
@@ -948,12 +970,14 @@ document.addEventListener('DOMContentLoaded', () => {
         openModal(modalEditarPartido);
     }
 
-    btnConfirmarEditarPartido.addEventListener('click', () => {
+    btnConfirmarEditarPartido.addEventListener('click', async () => {
         if (!partidoParaEditar.torneoId) return;
 
         const { torneoId, rondaIdx, partidoIdx } = partidoParaEditar;
         const torneo = torneos.find(t => t.id === torneoId);
         if (!torneo) return;
+
+        const estadoOriginal = JSON.parse(JSON.stringify(torneo));
 
         const selects = [
             document.getElementById('jugador-eq1-p1'),
@@ -974,23 +998,23 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!confirm("Este partido ya tiene un resultado. Al cambiar los jugadores, el resultado se borrará. ¿Deseas continuar?")) {
                 return;
             }
-            // Revert points if the match had a result
             modificarPuntosRondaYTorneo(torneo, partido.ganadorEquipoKey === 'equipo1' ? partido.equipo1 : partido.equipo2, null, partido.ganadorEquipoKey, -PUNTOS_POR_CANCHA[partido.cancha], partido.cancha, false);
             partido.ganadorEquipoKey = null;
         }
 
-        // Update player assignments
         partido.equipo1 = [nuevosJugadores[0], nuevosJugadores[1]];
         partido.equipo2 = [nuevosJugadores[2], nuevosJugadores[3]];
         partido.jugadoresEnCanchaNombres = nuevosJugadores;
 
-        // We might need to update pairing history, but for a simple swap, this is complex.
-        // For now, we assume the admin is correcting an error and pairing history update is not critical.
-
-        guardarDatosCategoriaActual();
-        closeModal(modalEditarPartido);
-        renderizarDetalleTorneo(torneoId);
-        alert("Los jugadores del partido han sido actualizados.");
+        const guardadoExitoso = await guardarDatosCategoriaActual();
+        if(guardadoExitoso) {
+            closeModal(modalEditarPartido);
+            renderizarDetalleTorneo(torneoId);
+        } else {
+            const index = torneos.findIndex(t => t.id === torneoId);
+            if(index !== -1) torneos[index] = estadoOriginal;
+            alert("Error al guardar cambios en el partido. Revisa la consola (F12).");
+        }
     });
 
 
@@ -1070,10 +1094,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function restarPuntosExtraDeTorneo(t) {
         if (t.tipo === 'individual') {
-            t.jugadores.forEach(j => {
-                j.puntosExtra = 0;
-            });
-        } else { // parejas
+            t.jugadores.forEach(j => { j.puntosExtra = 0; });
+        } else {
             t.parejas.forEach(p => {
                 p.jugadoresNombres.forEach(nJ => {
                     const jug = t.jugadores.find(j=>j.nombre===nJ && j.parejaId === p.id);
@@ -1085,7 +1107,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function actualizarPuntosGlobalesTrasFinalizar(t) { if (t.tipo === 'individual') t.jugadores.forEach(j => { if (jugadoresGlobal[j.nombre]) recalcularPuntosGlobalesJugador(j.nombre); }); else t.parejas.forEach(p => p.jugadoresNombres.forEach(nJ => { if (jugadoresGlobal[nJ]) recalcularPuntosGlobalesJugador(nJ); }));}
     function recalcularPuntosGlobalesJugador(nJ) {
-        if (!categoriaActiva || !jugadoresGlobal[nJ]) return; let pI=0,pP=0,tJ=0;
+        if (!categoriaActiva || !jugadoresGlobal[nJ]) return;
+        let pI=0, pP=0, tJ=0;
         const torneosDeCategoria = appData.datosPorCategoria[categoriaActiva].torneos || [];
         torneosDeCategoria.forEach(t=>{
             if(t.estado==='historico'){
@@ -1104,13 +1127,29 @@ document.addEventListener('DOMContentLoaded', () => {
         jugadoresGlobal[nJ].puntosTotalesPorTipo.todos=pI+pP;
         jugadoresGlobal[nJ].torneosJugados=tJ;
     }
-    btnFinalizarTorneo.addEventListener('click', () => {
-        if (!categoriaActiva || !isAdminMode) return;
+    btnFinalizarTorneo.addEventListener('click', async () => {
+        if (!isAdminMode) return;
         const torneo = torneos.find(t => t.id === torneoActualSeleccionadoId); if (!torneo || torneo.estado === 'historico') return;
         if (!confirm(`Finalizar torneo "${torneo.nombre}"? Se calcularán puntos extra y no se podrán hacer más cambios (a menos que se edite).`)) return;
+
+        const estadoOriginal = torneo.estado;
+        const rankingOriginal = JSON.parse(JSON.stringify(torneo.rankingFinal));
+        const jugadoresOriginal = JSON.parse(JSON.stringify(torneo.jugadores));
+        const parejasOriginal = JSON.parse(JSON.stringify(torneo.parejas));
+
         finalizarLogicaTorneo(torneo, false);
-        guardarDatosCategoriaActual(); renderizarDetalleTorneo(torneo.id); renderizarListasDeTorneos();
-        alert(`Torneo "${torneo.nombre}" finalizado. Puntos Palmira asignados.`);
+
+        const guardadoExitoso = await guardarDatosCategoriaActual();
+        if(guardadoExitoso) {
+            renderizarDetalleTorneo(torneo.id);
+            renderizarListasDeTorneos();
+        } else {
+            torneo.estado = estadoOriginal; // Revertir
+            torneo.rankingFinal = rankingOriginal;
+            torneo.jugadores = jugadoresOriginal;
+            torneo.parejas = parejasOriginal;
+            alert("Error al finalizar el torneo. Revisa la consola (F12).");
+        }
     });
 
     filtroTipoTorneoResultadosEl.addEventListener('change', renderizarResultadosGlobales);
@@ -1123,7 +1162,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const anoActual = new Date().getFullYear();
         const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-        torneos.forEach(torneo => {
+        (torneos || []).forEach(torneo => {
             if (torneo.estado === 'historico' && torneo.fechaCreacion) {
                 const fecha = new Date(torneo.fechaCreacion);
                 const anioTorneo = fecha.getFullYear();
@@ -1157,7 +1196,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderizarResultadosGlobales() {
-        if (!categoriaActiva) return;
+        if (!categoriaActiva || !jugadoresGlobal) return;
         tablaResultadosGlobalesBodyEl.innerHTML = '';
         const tipoFiltro = filtroTipoTorneoResultadosEl.value;
         const mesAnioFiltro = filtroMesResultadosEl ? filtroMesResultadosEl.value : 'todos';
@@ -1165,7 +1204,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const jugadoresPuntosFiltrados = {};
         Object.keys(jugadoresGlobal).forEach(nombreJugador => {
             jugadoresPuntosFiltrados[nombreJugador] = 0;
-            torneos.forEach(torneo => {
+            (torneos || []).forEach(torneo => {
                 if (torneo.estado === 'historico') {
                     let coincideTipo = (tipoFiltro === 'todos' || torneo.tipo === tipoFiltro);
                     let coincidePeriodo = false;
@@ -1217,7 +1256,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const jugadoresPuntosFiltrados = {};
         Object.keys(jugadoresGlobal).forEach(nombreJugador => {
             jugadoresPuntosFiltrados[nombreJugador] = 0;
-            torneos.forEach(torneo => {
+            (torneos || []).forEach(torneo => {
                 if (torneo.estado === 'historico') {
                     let coincideTipo = (tipoFiltro === 'todos' || torneo.tipo === tipoFiltro);
                     let coincidePeriodo = (mesAnioFiltro === 'todos');
@@ -1384,9 +1423,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const jugadoresArray = Object.values(jugadoresGlobal).map(data => ({
-            nombre: Object.keys(jugadoresGlobal).find(key => jugadoresGlobal[key] === data),
-            puntos: data.puntosTotalesPorTipo.todos || 0
+        const jugadoresArray = Object.keys(jugadoresGlobal).map(nombre => ({
+            nombre: nombre,
+            puntos: (jugadoresGlobal[nombre].puntosTotalesPorTipo && jugadoresGlobal[nombre].puntosTotalesPorTipo.todos) || 0
         }));
 
         jugadoresArray.sort((a, b) => b.puntos - a.puntos);
@@ -1409,7 +1448,7 @@ document.addEventListener('DOMContentLoaded', () => {
         inicioDashboardEl.classList.remove('hidden');
 
 
-        const torneosFinalizados = torneos
+        const torneosFinalizados = (torneos || [])
             .filter(t => t.estado === 'historico')
             .sort((a, b) => new Date(b.fechaCreacion) - new Date(a.fechaCreacion));
 
@@ -1433,7 +1472,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- GESTIÓN DE JUGADORES (TAB) ---
     filtroNombreJugadorInput.addEventListener('input', () => renderizarListaGlobalJugadores());
     function renderizarListaGlobalJugadores() {
         if (!categoriaActiva) return;
@@ -1474,96 +1512,111 @@ document.addEventListener('DOMContentLoaded', () => {
         dynamicCategoryNameModalElements.forEach(el => el.textContent = categoriaActiva);
         openModal(modalEditarNombreJugador);
     }
-    btnConfirmarEditarNombreJugador.addEventListener('click', () => {
-        if (!categoriaActiva || !isAdminMode || !jugadorParaEditarNombre) return;
+    btnConfirmarEditarNombreJugador.addEventListener('click', async () => {
+        if (!isAdminMode || !jugadorParaEditarNombre) return;
         const nActual = jugadorParaEditarNombre;
         const nNuevo = nombreJugadorNuevoInput.value.trim().replace(/\s+/g, ' ');
-        if (!nNuevo) { alert("Nombre nuevo no puede estar vacío."); return; }
-        const nNuevoNorm = nNuevo.toLowerCase(); const nActualNorm = nActual.toLowerCase();
-        if (nNuevoNorm !== nActualNorm && Object.keys(jugadoresGlobal).some(k => k.toLowerCase() === nNuevoNorm)) { alert(`"${nNuevo}" ya existe. Elige otro.`); return; }
+        if (!nNuevo || nNuevo.toLowerCase() === nActual.toLowerCase()) { closeModal(modalEditarNombreJugador); return; }
+        if (Object.keys(jugadoresGlobal).some(k => k.toLowerCase() === nNuevo.toLowerCase())) { alert(`"${nNuevo}" ya existe.`); return; }
         if (!confirm(`Cambiar "${nActual}" a "${nNuevo}" en ${categoriaActiva}?\nEsto afectará TODOS los torneos y resultados.`)) return;
-        if (jugadoresGlobal[nActual]) { if (nActualNorm !== nNuevoNorm || nActual !== nNuevo) { jugadoresGlobal[nNuevo] = jugadoresGlobal[nActual]; delete jugadoresGlobal[nActual]; }}
+
+        const datosOriginales = JSON.parse(JSON.stringify(appData.datosPorCategoria[categoriaActiva]));
+
+        jugadoresGlobal[nNuevo] = jugadoresGlobal[nActual];
+        delete jugadoresGlobal[nActual];
+
         torneos.forEach(t => {
             t.jugadores.forEach(j => { if (j.nombre === nActual) j.nombre = nNuevo; if (j.historialParejasRonda) j.historialParejasRonda.forEach(h => { if (h.companeroNombre === nActual) h.companeroNombre = nNuevo; }); });
             if (t.tipo === 'parejas') t.parejas.forEach(p => p.jugadoresNombres = p.jugadoresNombres.map(n => n === nActual ? nNuevo : n));
             t.rondas.forEach(r => r.partidos.forEach(p => { p.equipo1 = p.equipo1.map(n => n === nActual ? nNuevo : n); p.equipo2 = p.equipo2.map(n => n === nActual ? nNuevo : n); if (p.jugadoresEnCanchaNombres) p.jugadoresEnCanchaNombres = p.jugadoresEnCanchaNombres.map(n => n === nActual ? nNuevo : n); }));
             if (t.rankingFinal) t.rankingFinal.forEach(rI => { if (t.tipo==='individual' && rI.nombre===nActual) rI.nombre=nNuevo; else if (t.tipo==='parejas' && rI.nombre.includes(nActual)) rI.nombre = rI.nombre.split(' & ').map(n => n === nActual ? nNuevo : n).join(' & ');});
         });
-        guardarDatosCategoriaActual(); closeModal(modalEditarNombreJugador); renderizarListaGlobalJugadores();
-        if (torneoActualSeleccionadoId) renderizarDetalleTorneo(torneoActualSeleccionadoId); renderizarResultadosGlobales();
-        alert(`Nombre cambiado de "${nActual}" a "${nNuevo}" en ${categoriaActiva}.`);
+
+        const guardadoExitoso = await guardarDatosCategoriaActual();
+        if(guardadoExitoso) {
+            closeModal(modalEditarNombreJugador);
+            renderizarListaGlobalJugadores();
+            if (torneoActualSeleccionadoId) renderizarDetalleTorneo(torneoActualSeleccionadoId);
+            renderizarResultadosGlobales();
+        } else {
+            appData.datosPorCategoria[categoriaActiva] = datosOriginales;
+            torneos = appData.datosPorCategoria[categoriaActiva].torneos;
+            jugadoresGlobal = appData.datosPorCategoria[categoriaActiva].jugadoresGlobal;
+            alert("Error al guardar el cambio de nombre. Revisa la consola (F12).");
+        }
     });
 
-    function confirmarEliminarJugador(nombreJugador) {
-        if (!categoriaActiva || !isAdminMode || !jugadoresGlobal[nombreJugador]) return;
+    async function confirmarEliminarJugador(nombreJugador) {
+        if (!isAdminMode || !jugadoresGlobal[nombreJugador]) return;
         const torneosActivosConJugador = torneos.filter(t =>
-            t.estado === 'actual' &&
-            (t.jugadores.some(j => j.nombre === nombreJugador) ||
-             (t.tipo === 'parejas' && t.parejas.some(p => p.jugadoresNombres.includes(nombreJugador))))
+            t.estado === 'actual' && t.jugadores.some(j => j.nombre === nombreJugador)
         );
         if (torneosActivosConJugador.length > 0) {
-            alert(`"${nombreJugador}" participa en ${torneosActivosConJugador.length} torneo(s) activo(s).\nNo se puede eliminar.`);
+            alert(`"${nombreJugador}" participa en torneos activos y no puede ser eliminado.`);
             return;
         }
-        if (confirm(`ELIMINAR a "${nombreJugador}" de ${categoriaActiva}?\nNo estará disponible para futuros torneos y se quitará de rankings globales.\nResultados históricos NO se alterarán.`)) {
+        if (confirm(`ELIMINAR a "${nombreJugador}" de ${categoriaActiva}? Sus resultados históricos permanecerán, pero no podrá ser añadido a nuevos torneos.`)) {
+            const datosOriginales = jugadoresGlobal[nombreJugador];
             delete jugadoresGlobal[nombreJugador];
-            guardarDatosCategoriaActual();
-            renderizarListaGlobalJugadores();
-            renderizarResultadosGlobales();
-            if(modalCrearTorneo.style.display === 'block') actualizarInputsJugadores();
-            alert(`Jugador "${nombreJugador}" eliminado de ${categoriaActiva}.`);
+            const guardadoExitoso = await guardarDatosCategoriaActual();
+            if (guardadoExitoso) {
+                renderizarListaGlobalJugadores();
+                renderizarResultadosGlobales();
+            } else {
+                jugadoresGlobal[nombreJugador] = datosOriginales;
+                alert("Error al eliminar el jugador. Revisa la consola (F12).");
+            }
         }
     }
 
-    function confirmarEliminarTorneo(torneoId) {
-        if (!isAdminMode) return;
-        if (!categoriaActiva) {
-            console.error("No hay categoría activa para eliminar el torneo.");
-            return;
-        }
-
+    async function confirmarEliminarTorneo(torneoId) {
+        if (!isAdminMode || !categoriaActiva) return;
         const torneoIndex = torneos.findIndex(t => t.id === torneoId);
-        if (torneoIndex === -1) {
-            alert("Error: Torneo no encontrado para eliminar.");
-            return;
-        }
+        if (torneoIndex === -1) { alert("Error: Torneo no encontrado."); return; }
+
         const torneoAEliminar = torneos[torneoIndex];
+        if (confirm(`¿SEGURO de eliminar el torneo "${torneoAEliminar.nombre}"?\nEsta acción es IRREVERSIBLE.`)) {
 
-        if (confirm(`¿Estás SEGURO de eliminar el torneo "${torneoAEliminar.nombre}" de la categoría "${categoriaActiva}"?\nEsta acción es IRREVERSIBLE y también afectará los Puntos Palmira globales de los jugadores participantes en esta categoría.`)) {
-            const jugadoresAfectados = new Set();
-            if (torneoAEliminar.estado === 'historico') {
-                torneoAEliminar.jugadores.forEach(j => jugadoresAfectados.add(j.nombre));
-            }
-
+            const torneoOriginal = torneos[torneoIndex];
             torneos.splice(torneoIndex, 1);
 
-            jugadoresAfectados.forEach(nombreJugador => {
-                if (jugadoresGlobal[nombreJugador]) {
-                    recalcularPuntosGlobalesJugador(nombreJugador);
-                }
-            });
+            // Recalcular puntos como si el torneo no existiera
+            const jugadoresAfectados = new Set(torneoOriginal.jugadores.map(j => j.nombre));
+            jugadoresAfectados.forEach(recalcularPuntosGlobalesJugador);
 
-            guardarDatosGlobales().then(() => {
-                alert(`Torneo "${torneoAEliminar.nombre}" eliminado permanentemente.`);
+            const guardadoExitoso = await guardarDatosGlobales();
+
+            if (guardadoExitoso) {
                 mostrarVistaListaTorneos();
                 renderizarListasDeTorneos();
                 renderizarResultadosGlobales();
                 popularFiltroMeses();
-            }).catch(error => {
-                console.error("Error al guardar datos después de eliminar torneo:", error);
-                alert("El torneo se eliminó de la vista actual, pero hubo un error al guardar los cambios en la nube. Por favor, recarga la aplicación.");
-            });
+            } else {
+                torneos.splice(torneoIndex, 0, torneoOriginal); // Revertir eliminación
+                 // Revertir recálculo de puntos
+                jugadoresAfectados.forEach(recalcularPuntosGlobalesJugador);
+                alert("Error al eliminar el torneo. Revisa la consola (F12).");
+            }
         }
     }
 
-    // --- PERSISTENCIA ---
-    function guardarDatosCategoriaActual() { if (!categoriaActiva || !isAdminMode) return; guardarDatosGlobales(); }
+    function guardarDatosCategoriaActual() { 
+        if (!categoriaActiva || !isAdminMode) return Promise.resolve(false); 
+        return guardarDatosGlobales();
+    }
 
-    // --- INICIALIZACIÓN ---
+    window.addEventListener('beforeunload', (e) => {
+        if (isSaving) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+
     async function initApp() {
         checkAdminSession();
         await cargarDatosGlobales();
         mostrarPantallaCategorias();
     }
+
     initApp();
 });
