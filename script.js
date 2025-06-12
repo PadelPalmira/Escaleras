@@ -104,7 +104,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const reloadButton = document.createElement('button');
         reloadButton.id = 'forceReloadBtn';
-        reloadButton.className = 'nav-button';
+        // CORRECCIÓN: Se añade la clase 'admin-feature' para que se oculte automáticamente.
+        reloadButton.className = 'nav-button admin-feature';
         reloadButton.title = 'Sincronizar con la nube';
         reloadButton.innerHTML = `<i class="fas fa-sync-alt"></i>`;
         reloadButton.addEventListener('click', async () => {
@@ -330,10 +331,6 @@ document.addEventListener('DOMContentLoaded', () => {
             alert(`¡Error Crítico! El torneo no se pudo guardar en la nube.\n\nPor favor, revisa la consola del desarrollador (F12) para ver los detalles técnicos y vuelve a intentarlo. No refresques la página o perderás los datos.`);
         }
     });
-
-    // El resto de las funciones que llaman a guardarDatosGlobales seguirán un patrón similar de 'await'
-    // y manejo de la respuesta para revertir cambios si es necesario.
-    // Aquí se presenta el código completo con todas las correcciones.
 
     btnAgregarCategoriaEl.addEventListener('click', async () => {
         if (!isAdminMode) return;
@@ -596,8 +593,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Todas las funciones que siguen son las mismas, no necesitan cambios en su lógica de guardado
-    // porque ya están cubiertas por la nueva función guardarDatosGlobales.
     function generarNuevaRondaLogica(torneo) {
         const ultimaRonda = torneo.rondas[torneo.rondas.length - 1];
         const nuevaRonda = { numero: ultimaRonda.numero + 1, partidos: [] }; const numCanchas = 3;
