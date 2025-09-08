@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const PUNTOS_POR_CANCHA = { 1: 3, 2: 2, 3: 1 };
     const PUNTOS_EXTRA_INDIVIDUAL = { 1: 600, 2: 500, 3: 400, 4: 300, 5: 250, 6: 200, 7: 175, 8: 150, 9: 125, 10: 100, 11: 75, 12: 50 };
     const PUNTOS_EXTRA_PAREJAS = { 1: 600, 2: 500, 3: 400, 4: 300, 5: 200, 6: 100 };
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxvHZFN7EUdKicTzUhA37u-dGC47bqP3ScDkJ4QzxwV70KpXHQ1jEa5iRYC4S11iEUxyg/exec';
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzwLSkL7J_vmqsgIovSYv9eO0QZR46SaABihXsDCFDDz2OKkFdKix8naMMIgqskt3aX-w/exec';
     const ADMIN_PASSWORD = '5858';
     const ADMIN_SESSION_DURATION = 4 * 60 * 60 * 1000; // 4 horas en milisegundos
 
@@ -1196,78 +1196,42 @@ document.addEventListener('DOMContentLoaded', () => {
         const tipoFiltro = filtroTipoTorneoResultadosEl.value;
         const mesAnioFiltro = filtroMesResultadosEl ? filtroMesResultadosEl.value : 'todos';
 
-        const jugArray = Object.keys(jugadoresGlobal).map(nombreJugador => {
-            let pIndividual = 0;
-            let pParejas = 0;
-
-            // Si no hay filtros, usamos los puntos globales ya calculados para mayor eficiencia.
-            if (tipoFiltro === 'todos' && mesAnioFiltro === 'todos') {
-                const playerData = jugadoresGlobal[nombreJugador];
-                if (playerData && playerData.puntosTotalesPorTipo) {
-                    pIndividual = playerData.puntosTotalesPorTipo.individual || 0;
-                    pParejas = playerData.puntosTotalesPorTipo.parejas || 0;
-                }
-            } else {
-                // Si hay filtros, calculamos los puntos sobre la marcha.
-                (torneos || []).forEach(torneo => {
-                    if (torneo.estado === 'historico' && torneo.rankingFinal) {
-                        
-                        let coincideTipo = (tipoFiltro === 'todos' || torneo.tipo === tipoFiltro);
-                        let coincidePeriodo = (mesAnioFiltro === 'todos');
-                        if (!coincidePeriodo && torneo.fechaCreacion) {
-                            const fechaTorneo = new Date(torneo.fechaCreacion);
-                            const anioTorneo = fechaTorneo.getFullYear().toString();
-                            const mesKeyTorneo = `${anioTorneo}-${String(fechaTorneo.getMonth() + 1).padStart(2, '0')}`;
-                            if (mesAnioFiltro.length === 4) { // Filtro por año
-                                if (anioTorneo === mesAnioFiltro) coincidePeriodo = true;
-                            } else { // Filtro por mes
-                                if (mesKeyTorneo === mesAnioFiltro) coincidePeriodo = true;
-                            }
-                        }
-
-                        if (coincideTipo && coincidePeriodo) {
-                            const resultadoJugador = torneo.rankingFinal.find(r => r.nombre.includes(nombreJugador));
-                            if (resultadoJugador) {
-                                const esParteDePareja = torneo.tipo === 'parejas' && resultadoJugador.nombre.split(' & ').map(n => n.trim()).includes(nombreJugador);
-                                const esIndividual = torneo.tipo === 'individual' && resultadoJugador.nombre.trim() === nombreJugador;
-
-                                if (esIndividual || esParteDePareja) {
-                                    if (torneo.tipo === 'individual') {
-                                        pIndividual += resultadoJugador.total || 0;
-                                    } else {
-                                        pParejas += resultadoJugador.total || 0;
-                                    }
-                                }
-                            }
+        const jugadoresPuntosFiltrados = {};
+        Object.keys(jugadoresGlobal).forEach(nombreJugador => {
+            jugadoresPuntosFiltrados[nombreJugador] = 0;
+            (torneos || []).forEach(torneo => {
+                if (torneo.estado === 'historico') {
+                    let coincideTipo = (tipoFiltro === 'todos' || torneo.tipo === tipoFiltro);
+                    let coincidePeriodo = false;
+                    if (mesAnioFiltro === 'todos') {
+                        coincidePeriodo = true;
+                    } else if (torneo.fechaCreacion) {
+                        const fechaTorneo = new Date(torneo.fechaCreacion);
+                        const anioTorneo = fechaTorneo.getFullYear().toString();
+                        const mesKeyTorneo = `${anioTorneo}-${String(fechaTorneo.getMonth() + 1).padStart(2, '0')}`;
+                        if (mesAnioFiltro.length === 4) {
+                            if (anioTorneo === mesAnioFiltro) coincidePeriodo = true;
+                        } else {
+                            if (mesKeyTorneo === mesAnioFiltro) coincidePeriodo = true;
                         }
                     }
-                });
-            }
-
-            return {
-                nombre: nombreJugador,
-                puntosIndividual: pIndividual,
-                puntosParejas: pParejas,
-                puntosTotales: pIndividual + pParejas
-            };
-        })
-        .filter(j => j.puntosTotales > 0) // Mostrar solo jugadores con puntos en la vista filtrada
-        .sort((a, b) => b.puntosTotales - a.puntosTotales);
-
-        jugArray.forEach((jug, idx) => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td data-label="Pos.">${idx + 1}</td>
-                <td data-label="Jugador">${jug.nombre}</td>
-                <td data-label="P. Individual">${jug.puntosIndividual}</td>
-                <td data-label="P. Parejas">${jug.puntosParejas}</td>
-                <td data-label="Total Puntos Palmira">${jug.puntosTotales}</td>`;
-            tablaResultadosGlobalesBodyEl.appendChild(tr);
+                    if (coincideTipo && coincidePeriodo) {
+                        const jugadorEnTorneo = torneo.jugadores.find(j => j.nombre === nombreJugador);
+                        if (jugadorEnTorneo) {
+                            jugadoresPuntosFiltrados[nombreJugador] += (jugadorEnTorneo.puntosRonda || 0) + (jugadorEnTorneo.puntosExtra || 0);
+                        }
+                    }
+                }
+            });
         });
-
+        const jugArray = Object.entries(jugadoresPuntosFiltrados)
+            .map(([nombre, puntosMostrados]) => ({ nombre, puntosMostrados }))
+            .filter(j => j.puntosMostrados > 0 || (tipoFiltro === 'todos' && mesAnioFiltro === 'todos'))
+            .sort((a, b) => b.puntosMostrados - a.puntosMostrados);
+        jugArray.forEach((jug, idx) => { const tr = document.createElement('tr'); tr.innerHTML = `<td data-label="Pos.">${idx + 1}</td><td data-label="Jugador">${jug.nombre}</td><td data-label="Total Puntos Palmira">${jug.puntosMostrados}</td>`; tablaResultadosGlobalesBodyEl.appendChild(tr); });
         if (jugArray.length === 0) {
             let msg = `No hay datos en ${categoriaActiva} para los filtros seleccionados.`;
-            tablaResultadosGlobalesBodyEl.innerHTML = `<tr><td colspan="5" data-label="Info">${msg}</td></tr>`;
+            tablaResultadosGlobalesBodyEl.innerHTML = `<tr><td colspan="3" data-label="Info">${msg}</td></tr>`;
         }
     }
 
