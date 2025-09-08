@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const PUNTOS_POR_CANCHA = { 1: 3, 2: 2, 3: 1 };
     const PUNTOS_EXTRA_INDIVIDUAL = { 1: 600, 2: 500, 3: 400, 4: 300, 5: 250, 6: 200, 7: 175, 8: 150, 9: 125, 10: 100, 11: 75, 12: 50 };
     const PUNTOS_EXTRA_PAREJAS = { 1: 600, 2: 500, 3: 400, 4: 300, 5: 200, 6: 100 };
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz6LgbWysdV9g5qV1WAmRQEQGaczkxMrdu50OaXAWRuKXSk0zm_KR4ASaItl-W5EXRn-Q/exec';
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwl7w0no_EULERqP0M1wldgaT1mtA-3R2U0R1yypv5W3y8P-U49735aFPAFm6QXvQzrXQ/exec';
     const ADMIN_PASSWORD = '5858';
     const ADMIN_SESSION_DURATION = 4 * 60 * 60 * 1000; // 4 horas en milisegundos
 
