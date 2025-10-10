@@ -199,23 +199,37 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log("Cargando datos desde Google Sheet...");
         try {
             const response = await fetch(`${APPS_SCRIPT_URL}?timestamp=${new Date().getTime()}`, { cache: 'no-cache' });
-            if (!response.ok) { throw new Error(`Error de red al cargar datos: ${response.statusText}`); }
+            if (!response.ok) {
+                // Lanza un error si la respuesta del servidor no es exitosa
+                throw new Error(`Error de red al cargar datos: ${response.statusText}`);
+            }
             const dataDesdeSheet = await response.json();
-            if (dataDesdeSheet && typeof dataDesdeSheet === 'object') {
-                appData = dataDesdeSheet; 
-                if (!appData.listaCategorias) appData.listaCategorias = [];
+    
+            // Comprueba si los datos recibidos son válidos antes de asignarlos
+            if (dataDesdeSheet && typeof dataDesdeSheet === 'object' && Array.isArray(dataDesdeSheet.listaCategorias)) {
+                appData = dataDesdeSheet;
                 if (!appData.datosPorCategoria) appData.datosPorCategoria = {};
                 console.log("Datos cargados:", appData);
             } else {
-                console.warn("No se recibieron datos válidos. Usando estructura por defecto.");
-                appData = { listaCategorias: ["4ta Varonil", "5ta Varonil"], datosPorCategoria: { "4ta Varonil": { torneos: [], jugadoresGlobal: {} }, "5ta Varonil": { torneos: [], jugadoresGlobal: {} } }, ultimaCategoriaActiva: null };
+                // Lanza un error si los datos no son válidos, para evitar sobrescribir con información corrupta
+                throw new Error("Los datos recibidos desde la nube no son válidos o están vacíos.");
             }
         } catch (error) {
             console.error("Error CRÍTICO al cargar datos:", error);
-            alert("No se pudieron cargar los datos desde Google Sheets. La aplicación podría no funcionar correctamente.\nError: " + error.message);
-            appData = { listaCategorias: [], datosPorCategoria: {}, ultimaCategoriaActiva: null };
+            // Muestra un mensaje de error más visible y evita que la app continúe
+            document.body.innerHTML = `<div style="padding: 20px; text-align: center; background-color: #ffdddd; border: 2px solid red;">
+                <h1>Error de Conexión</h1>
+                <p>No se pudieron cargar los datos de Padel Palmira. Por favor, revisa tu conexión a internet y refresca la página.</p>
+                <p><strong>No realices ninguna acción para evitar la pérdida de datos.</strong></p>
+                <hr>
+                <p><i>Detalle del error: ${error.message}</i></p>
+            </div>`;
+            
+            // Detiene la ejecución posterior de guardado para proteger los datos
+            isSaving = true; // Bloquea cualquier intento de guardado
         }
     }
+    
 
     async function guardarDatosGlobales() {
         if (!isAdminMode) return false;
