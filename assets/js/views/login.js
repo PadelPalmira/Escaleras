@@ -2,61 +2,45 @@ import { el, toast, humanizeError } from '../utils.js';
 import { icon } from '../icons.js';
 import { sendMagicLink } from '../api.js';
 
+// Una sola pantalla de entrada — no existe "regístrate" separado de "inicia
+// sesión". Con correo + enlace mágico basta: si es la primera vez, Supabase
+// crea la cuenta sola; si ya existe, entra directo. Nombre y celular NO se
+// piden aquí (se pedían antes, pero eso obligaba a cualquiera que ya tenía
+// cuenta a volver a escribirlos cada vez que entraba desde un dispositivo
+// nuevo, sin necesidad — esos datos ya viven en su perfil en Supabase). Se
+// piden una sola vez, justo después de entrar, en la pantalla obligatoria
+// "Completa tu perfil" (views/completar_perfil.js) — y solo si todavía
+// faltan, sin importar desde qué dispositivo se conecte.
 export function renderLoginScreen() {
   const wrap = el('div', { class: 'login-screen' });
 
   const logo = el('div', { class: 'login-logo' }, [el('img', { src: 'assets/img/logo-icon-white.png', alt: 'Padel Palmira', class: 'login-logo-img' })]);
   const title = el('div', { class: 'h1' }, ['Escaleras', el('br'), el('span', { class: 'text-gradient' }, 'Padel Palmira')]);
-  const sub = el('p', { class: 'text-muted' }, 'Regístrate o entra con tu correo — te mandamos un enlace mágico, sin contraseñas.');
+  const sub = el('p', { class: 'text-muted' }, 'Entra con tu correo — te mandamos un enlace mágico, sin contraseñas. Si es tu primera vez, tu cuenta se crea sola.');
 
-  const nameField = el('div', { class: 'field' }, [
-    el('label', {}, 'Nombre completo'),
-    el('input', { class: 'input', type: 'text', placeholder: 'Como te identificamos en el club', autocomplete: 'name', id: 'login-name' }),
-  ]);
   const emailField = el('div', { class: 'field' }, [
     el('label', {}, 'Correo electrónico'),
     el('input', { class: 'input', type: 'email', placeholder: 'tu@correo.com', autocomplete: 'email', id: 'login-email' }),
   ]);
-  const phoneField = el('div', { class: 'field' }, [
-    el('label', {}, 'Celular'),
-    el('input', { class: 'input', type: 'tel', placeholder: '10 dígitos', autocomplete: 'tel', id: 'login-phone' }),
-  ]);
-  const helpNote = el('p', { class: 'text-tiny text-muted mt-1' }, 'Nombre, correo y celular son obligatorios — así el club siempre sabe quién se registró y cómo contactarte.');
 
   const btn = el('button', { class: 'btn btn-primary' }, 'Enviar enlace mágico');
   const status = el('div', { class: 'text-tiny mt-3' });
 
   btn.addEventListener('click', async () => {
-    const nameInput = document.getElementById('login-name');
     const emailInput = document.getElementById('login-email');
-    const phoneInput = document.getElementById('login-phone');
-    const full_name = (nameInput.value || '').trim();
     const email = (emailInput.value || '').trim();
-    const phoneDigits = (phoneInput.value || '').replace(/\D/g, '');
 
-    if (!full_name) {
-      status.textContent = 'Escribe tu nombre completo.';
-      status.style.color = 'var(--danger)';
-      nameInput.focus();
-      return;
-    }
     if (!email || !email.includes('@')) {
       status.textContent = 'Escribe un correo válido.';
       status.style.color = 'var(--danger)';
       emailInput.focus();
       return;
     }
-    if (phoneDigits.length !== 10) {
-      status.textContent = 'Escribe tu celular a 10 dígitos.';
-      status.style.color = 'var(--danger)';
-      phoneInput.focus();
-      return;
-    }
     btn.disabled = true;
     btn.textContent = 'Enviando…';
     status.textContent = '';
     try {
-      await sendMagicLink(email, { full_name, phone: phoneDigits });
+      await sendMagicLink(email);
       wrap.replaceChildren(
         logo,
         el('div', { class: 'h1 mb-2' }, 'Revisa tu correo'),
@@ -80,12 +64,10 @@ export function renderLoginScreen() {
     }
   });
 
-  [nameField, emailField, phoneField].forEach((field) => {
-    field.querySelector('input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') btn.click();
-    });
+  emailField.querySelector('input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') btn.click();
   });
 
-  wrap.append(logo, title, sub, nameField, emailField, phoneField, helpNote, btn, status);
+  wrap.append(logo, title, sub, emailField, btn, status);
   return wrap;
 }
