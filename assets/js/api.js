@@ -11,10 +11,15 @@ export async function getSession() {
   return data.session;
 }
 
-export async function sendMagicLink(email) {
+export async function sendMagicLink(email, { full_name, phone } = {}) {
   const { error } = await supabase.auth.signInWithOtp({
     email,
-    options: { emailRedirectTo: window.location.origin + window.location.pathname },
+    options: {
+      emailRedirectTo: window.location.origin + window.location.pathname,
+      // Se guarda en auth.users.raw_user_meta_data — el trigger handle_new_user
+      // lo usa para sembrar el perfil la primera vez que alguien entra.
+      data: { full_name, phone },
+    },
   });
   if (error) throw error;
 }

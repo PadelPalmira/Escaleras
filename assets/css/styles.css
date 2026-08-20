@@ -131,6 +131,9 @@ img{ max-width: 100%; display: block; }
   background: var(--gradient-brand);
   box-shadow: 0 0 12px rgba(0,242,234,0.5);
 }
+.app-header .brand .brand-logo{
+  height: 22px; width: auto; flex-shrink: 0;
+}
 .app-header .header-actions{ display: flex; align-items: center; gap: var(--sp-3); }
 .avatar-btn{
   width: 32px; height: 32px; border-radius: 50%;
@@ -372,11 +375,12 @@ textarea.input{ height: auto; padding: var(--sp-3) var(--sp-4); resize: vertical
   max-width: var(--max-w); margin: 0 auto; width: 100%;
 }
 .login-logo{
-  width: 64px; height: 64px; border-radius: var(--r-lg);
-  background: var(--gradient-brand);
   display: flex; align-items: center; justify-content: center;
-  font-size: 28px; margin-bottom: var(--sp-6);
-  box-shadow: var(--shadow-glow-cyan);
+  margin-bottom: var(--sp-6);
+}
+.login-logo-img{
+  height: 84px; width: auto;
+  filter: drop-shadow(0 0 18px rgba(0,242,234,0.28));
 }
 .login-screen .h1{ margin-bottom: var(--sp-2); }
 .login-screen .text-muted{ margin-bottom: var(--sp-7); }

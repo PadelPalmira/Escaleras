@@ -4,6 +4,7 @@ import { icon } from './icons.js';
 import { registerRoute, initRouter, navigate, currentRoute } from './router.js';
 import { getMyProfile, esAdminOMaestro } from './api.js';
 import { renderLoginScreen } from './views/login.js';
+import { renderCompletarPerfil } from './views/completar_perfil.js';
 import { renderHome } from './views/home.js';
 import { renderRanking } from './views/ranking.js';
 import { renderConvocatorias } from './views/convocatorias.js';
@@ -32,7 +33,10 @@ function buildShell(navItems) {
   appEl.innerHTML = '';
 
   headerEl = el('header', { class: 'app-header' }, [
-    el('div', { class: 'brand' }, [el('span', { class: 'dot' }), 'Escaleras Palmira']),
+    el('div', { class: 'brand' }, [
+      el('img', { class: 'brand-logo', src: 'assets/img/logo-icon-white.png', alt: '' }),
+      'Escaleras Palmira',
+    ]),
     el('div', { class: 'header-actions' }),
   ]);
 
@@ -70,6 +74,17 @@ async function showApp() {
   // en el servidor (RLS + guardas internas). Esto es solo la interfaz.
   let profile = null;
   try { profile = await getMyProfile(); } catch (err) { console.error('No se pudo cargar el perfil para la navegación:', err); }
+
+  // Nombre completo y celular son obligatorios (además del correo, que ya
+  // viene de la cuenta) — si faltan, bloqueamos el resto de la app hasta
+  // completarlos. Cubre tanto cuentas nuevas como perfiles viejos que se
+  // crearon antes de que estos campos fueran requeridos.
+  if (profile && (!profile.full_name?.trim() || !profile.phone?.trim())) {
+    appEl.innerHTML = '';
+    appEl.appendChild(renderCompletarPerfil(profile, () => showApp()));
+    return;
+  }
+
   const navItems = esAdminOMaestro(profile) ? [...NAV_ITEMS_BASE, NAV_ITEM_ADMIN] : NAV_ITEMS_BASE;
 
   buildShell(navItems);
