@@ -1,0 +1,10 @@
+// Configuración pública del proyecto Supabase.
+// La publishable key es segura de exponer en el cliente: el acceso real
+// está controlado por Row Level Security (RLS) en la base de datos, no por
+// mantener esta clave en secreto.
+export const SUPABASE_URL = 'https://lgcflspltyamhozzpjvg.supabase.co';
+export const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_vLRpApr7wqKQQxxWEl1NVA_7cL5gjW2';
+
+// Zona horaria oficial del club — TODOS los cortes de tiempo del sistema se
+// muestran/calculan en esta zona, sin importar dónde esté el usuario.
+export const CLUB_TZ = 'America/Mexico_City';

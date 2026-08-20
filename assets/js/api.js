@@ -1,0 +1,615 @@
+import { supabase } from './supabaseClient.js';
+import { todayISO } from './utils.js';
+
+/* ============================================================
+   Sesión / perfil
+   ============================================================ */
+
+export async function getSession() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  return data.session;
+}
+
+export async function sendMagicLink(email) {
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: window.location.origin + window.location.pathname },
+  });
+  if (error) throw error;
+}
+
+export async function signOut() {
+  await supabase.auth.signOut();
+}
+
+export async function getMyProfile() {
+  const session = await getSession();
+  if (!session) return null;
+  const { data, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateMyProfile(fields) {
+  const session = await getSession();
+  const { data, error } = await supabase.from('profiles').update(fields).eq('id', session.user.id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+/* ============================================================
+   Categoría / ranking
+   ============================================================ */
+
+/** Última fecha de corte (week_start_date) con snapshots calculados. */
+async function ultimaFechaSnapshot() {
+  const { data, error } = await supabase
+    .from('category_snapshots')
+    .select('week_start_date')
+    .order('week_start_date', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return data && data[0] ? data[0].week_start_date : null;
+}
+
+export async function getMiCategoria(playerId) {
+  const { data, error } = await supabase
+    .from('category_snapshots')
+    .select('*')
+    .eq('player_id', playerId)
+    .order('week_start_date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+/** Ranking completo de la última semana calculada, con nombre de jugador. */
+export async function getRankingCompleto() {
+  const fecha = await ultimaFechaSnapshot();
+  if (!fecha) return { fecha: null, filas: [] };
+  const { data, error } = await supabase
+    .from('category_snapshots')
+    .select('*, profiles(full_name, avatar_url)')
+    .eq('week_start_date', fecha)
+    .order('rank', { ascending: true, nullsFirst: false });
+  if (error) throw error;
+  return { fecha, filas: data };
+}
+
+/* ============================================================
+   Escaleras / convocatorias
+   ============================================================ */
+
+/** Convocatorias abiertas o próximas de los siguientes N días, con su horario. */
+export async function getProximasEscaleras(dias = 8) {
+  const desde = todayISO();
+  const hastaDate = new Date(desde + 'T00:00:00Z');
+  hastaDate.setUTCDate(hastaDate.getUTCDate() + dias);
+  const hasta = hastaDate.toISOString().slice(0, 10);
+
+  const { data, error } = await supabase
+    .from('escaleras')
+    .select('*, weekday_schedule(*)')
+    .gte('session_date', desde)
+    .lte('session_date', hasta)
+    .not('status', 'in', '("cancelled")')
+    .order('session_date', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+/** Mis registros (pasados y futuros) con el detalle de la escalera. */
+export async function getMisRegistros({ soloFuturas = true } = {}) {
+  const session = await getSession();
+  if (!session) return [];
+  let query = supabase
+    .from('escalera_registrations')
+    .select('*, escaleras(*, weekday_schedule(*))')
+    .eq('player_id', session.user.id)
+    .order('created_at', { ascending: false });
+  const { data, error } = await query;
+  if (error) throw error;
+  if (!soloFuturas) return data;
+  const hoy = todayISO();
+  return data.filter((r) => r.escaleras && r.escaleras.session_date >= hoy);
+}
+
+export async function getJugadoresParaPareja(escaleraId, excluirPlayerId) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name')
+    .eq('status', 'active')
+    .neq('id', excluirPlayerId)
+    .order('full_name', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+/* ---------------- Acciones (RPC) ---------------- */
+
+export async function registrarJugador(escaleraId, playerId, partnerId = null) {
+  const { data, error } = await supabase.rpc('registrar_jugador', {
+    p_escalera_id: escaleraId,
+    p_player_id: playerId,
+    p_partner_id: partnerId,
+  });
+  if (error) throw error;
+  return data && data[0] ? data[0] : data;
+}
+
+export async function responderInvitacionPareja(registrationId, aceptar) {
+  const { error } = await supabase.rpc('responder_invitacion_pareja', {
+    p_registration_id: registrationId,
+    p_aceptar: aceptar,
+  });
+  if (error) throw error;
+}
+
+export async function cancelarRegistro(registrationId) {
+  const { data, error } = await supabase.rpc('cancelar_registro', { p_registration_id: registrationId });
+  if (error) throw error;
+  return data;
+}
+
+export async function asignarSustituto(registrationId, sustitutoPlayerId, esCoach = false) {
+  const { data, error } = await supabase.rpc('asignar_sustituto', {
+    p_registration_id: registrationId,
+    p_sustituto_player_id: sustitutoPlayerId,
+    p_es_coach: esCoach,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/* ============================================================
+   Reglas
+   ============================================================ */
+
+export async function getReglas() {
+  const { data, error } = await supabase.from('rules_content').select('*').order('sort_order', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+/* ============================================================
+   Historial de puntos (perfil)
+   ============================================================ */
+
+export async function getMiHistorialPuntos(playerId, limite = 30) {
+  const { data, error } = await supabase
+    .from('points_ledger')
+    .select('*')
+    .eq('player_id', playerId)
+    .order('created_at', { ascending: false })
+    .limit(limite);
+  if (error) throw error;
+  return data;
+}
+
+/* ============================================================
+   Liguilla / Torneo de Ascenso
+   ============================================================ */
+
+/** A/B (o ambos, si está en Zona Límite) según la categoría vigente del jugador. */
+export function tiersElegiblesPorCategoria(categoria) {
+  if (!categoria) return [];
+  if (categoria.category === 'A') return ['liguilla_a'];
+  if (categoria.category === 'B') return ['ascenso_b'];
+  if (categoria.category === 'limite') {
+    return categoria.zona_limite_side === 'bottom_a' ? ['liguilla_a'] : ['ascenso_b'];
+  }
+  return [];
+}
+
+/** El evento de Liguilla/Ascenso más reciente para alguno de los tiers dados (cualquier estado). */
+export async function getEventoLiguillaActivo(tiers) {
+  if (!tiers || tiers.length === 0) return null;
+  const { data, error } = await supabase
+    .from('liguilla_events')
+    .select('*')
+    .in('tier', tiers)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function getMiCalificacionLiguilla(liguillaEventId, playerId) {
+  const { data, error } = await supabase
+    .from('liguilla_qualifiers')
+    .select('*')
+    .eq('liguilla_event_id', liguillaEventId)
+    .eq('player_id', playerId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+/** Calificados confirmados de este evento, con nombre — pool base para el draft. */
+export async function getCalificadosConfirmados(liguillaEventId) {
+  const { data, error } = await supabase
+    .from('liguilla_qualifiers')
+    .select('id, player_id, status, profiles(full_name)')
+    .eq('liguilla_event_id', liguillaEventId)
+    .eq('status', 'confirmed');
+  if (error) throw error;
+  return data;
+}
+
+/** Todas las parejas ya formadas de este evento, con nombres. */
+export async function getParejasLiguilla(liguillaEventId) {
+  const { data, error } = await supabase
+    .from('liguilla_pairs')
+    .select('*, player1:profiles!liguilla_pairs_player1_id_fkey(full_name), player2:profiles!liguilla_pairs_player2_id_fkey(full_name)')
+    .eq('liguilla_event_id', liguillaEventId);
+  if (error) throw error;
+  return data;
+}
+
+export async function getMiParejaLiguilla(liguillaEventId, playerId) {
+  const parejas = await getParejasLiguilla(liguillaEventId);
+  return parejas.find((p) => p.player1_id === playerId || p.player2_id === playerId) || null;
+}
+
+/** El pick de draft actualmente activo (pending = por elegir, offered = por responder). */
+export async function getPickActualDraft(liguillaEventId) {
+  const { data, error } = await supabase
+    .from('liguilla_draft_picks')
+    .select('*, picker:profiles!liguilla_draft_picks_picker_player_id_fkey(full_name), picked:profiles!liguilla_draft_picks_picked_player_id_fkey(full_name)')
+    .eq('liguilla_event_id', liguillaEventId)
+    .in('status', ['pending', 'offered'])
+    .order('pick_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+/** Todos los partidos del bracket de este evento (sin anidar parejas — se cruza en el cliente). */
+export async function getPartidosLiguilla(liguillaEventId) {
+  const { data, error } = await supabase
+    .from('liguilla_matches')
+    .select('*')
+    .eq('liguilla_event_id', liguillaEventId);
+  if (error) throw error;
+  return data;
+}
+
+export async function responderCalificacionLiguilla(qualifierId, aceptar) {
+  const { data, error } = await supabase.rpc('responder_calificacion_liguilla', {
+    p_qualifier_id: qualifierId,
+    p_aceptar: aceptar,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function hacerPickDraft(liguillaEventId, pickedPlayerId) {
+  const { data, error } = await supabase.rpc('hacer_pick_draft', {
+    p_liguilla_event_id: liguillaEventId,
+    p_picked_player_id: pickedPlayerId,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function responderPickDraft(pickId, aceptar) {
+  const { data, error } = await supabase.rpc('responder_pick_draft', {
+    p_pick_id: pickId,
+    p_aceptar: aceptar,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/* ============================================================
+   RBAC — helpers de solo-lectura sobre el rol ya cargado en el
+   perfil de sesión. La aplicación real de permisos siempre ocurre
+   en el servidor (RLS + guardas internas de cada función); esto es
+   únicamente para decidir qué mostrar en la interfaz.
+   ============================================================ */
+
+export function esAdminOMaestro(profile) {
+  return !!profile && (profile.role === 'admin' || profile.role === 'maestro');
+}
+export function esMaestro(profile) {
+  return !!profile && profile.role === 'maestro';
+}
+
+/* ============================================================
+   Admin — jugadores (buscar, sustituir, multas, suspensiones)
+   ============================================================ */
+
+export async function buscarJugadores(query, limite = 20) {
+  let q = supabase.from('profiles').select('*').order('full_name', { ascending: true }).limit(limite);
+  const f = (query || '').trim();
+  if (f) q = q.ilike('full_name', `%${f}%`);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data;
+}
+
+/** Registros activos (confirmed/substitute) de un jugador en escaleras futuras — para poder asignarle sustituto o marcarlo no-show desde su ficha. */
+export async function getRegistrosActivosDeJugador(playerId) {
+  const hoy = todayISO();
+  const { data, error } = await supabase
+    .from('escalera_registrations')
+    .select('*, escaleras(*, weekday_schedule(*))')
+    .eq('player_id', playerId)
+    .in('status', ['confirmed', 'substitute', 'waitlist'])
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).filter((r) => r.escaleras && r.escaleras.session_date >= hoy);
+}
+
+export async function marcarNoShow(registrationId) {
+  const { error } = await supabase.rpc('marcar_no_show', { p_registration_id: registrationId });
+  if (error) throw error;
+}
+
+export async function aplicarMulta(playerId, amountMxn, reason, escaleraId = null) {
+  const { data, error } = await supabase
+    .from('fines')
+    .insert({ player_id: playerId, amount_mxn: amountMxn, reason: reason || null, escalera_id: escaleraId })
+    .select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function marcarMultaEstado(fineId, status) {
+  const fields = { status };
+  if (status === 'paid') fields.paid_at = new Date().toISOString();
+  const { error } = await supabase.from('fines').update(fields).eq('id', fineId);
+  if (error) throw error;
+}
+
+export async function getMultasAdmin({ soloPendientes = false } = {}) {
+  let q = supabase.from('fines').select('*, profiles(full_name)').order('applied_at', { ascending: false });
+  if (soloPendientes) q = q.eq('status', 'pending');
+  const { data, error } = await q;
+  if (error) throw error;
+  return data;
+}
+
+export async function aplicarSuspension(playerId, startDate, endDate, reason) {
+  const { data, error } = await supabase
+    .from('suspensions')
+    .insert({ player_id: playerId, start_date: startDate, end_date: endDate || null, reason: reason || null })
+    .select().single();
+  if (error) throw error;
+  // Refleja el estado en profiles para que el resto de la app (registro, etc.) lo vea de inmediato.
+  await supabase.from('profiles').update({ status: 'suspended', suspended_until: endDate || null }).eq('id', playerId);
+  return data;
+}
+
+export async function levantarSuspension(suspensionId, playerId) {
+  const { error } = await supabase.from('suspensions').update({ lifted_at: new Date().toISOString() }).eq('id', suspensionId);
+  if (error) throw error;
+  await supabase.from('profiles').update({ status: 'active', suspended_until: null }).eq('id', playerId);
+}
+
+export async function getSuspensionesAdmin() {
+  const { data, error } = await supabase
+    .from('suspensions')
+    .select('*, profiles(full_name)')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+/* ============================================================
+   Admin — captura de resultados de escaleras
+   ============================================================ */
+
+export async function getEscalerasAdmin() {
+  const desde = new Date();
+  desde.setUTCDate(desde.getUTCDate() - 14);
+  const { data, error } = await supabase
+    .from('escaleras')
+    .select('*, weekday_schedule(*)')
+    .gte('session_date', desde.toISOString().slice(0, 10))
+    .not('status', 'in', '("cancelled")')
+    .order('session_date', { ascending: false });
+  if (error) throw error;
+  return (data || []).filter((e) => !e.is_liguilla);
+}
+
+export async function getRegistrosEscalera(escaleraId) {
+  const { data, error } = await supabase
+    .from('escalera_registrations')
+    .select('*, profiles(full_name)')
+    .eq('escalera_id', escaleraId)
+    .order('status', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+// OJO: los alias NUNCA deben llamarse igual que la columna uuid original
+// (p.ej. "team1_player1") — PostgREST no sabe distinguir el embed del
+// campo crudo y el resultado queda ambiguo/roto. Por eso cada alias aquí
+// termina en "_nombre".
+const NOMBRES_SEAT = 'team1_player1_nombre:profiles!round_matches_team1_player1_fkey(full_name), team1_player2_nombre:profiles!round_matches_team1_player2_fkey(full_name), team2_player1_nombre:profiles!round_matches_team2_player1_fkey(full_name), team2_player2_nombre:profiles!round_matches_team2_player2_fkey(full_name)';
+
+export async function getRondasConPartidos(escaleraId) {
+  const { data: rounds, error } = await supabase
+    .from('rounds').select('*').eq('escalera_id', escaleraId).order('round_number', { ascending: true });
+  if (error) throw error;
+  if (!rounds || rounds.length === 0) return [];
+  const { data: matches, error: err2 } = await supabase
+    .from('round_matches')
+    .select(`*, ${NOMBRES_SEAT}`)
+    .in('round_id', rounds.map((r) => r.id))
+    .order('court_number', { ascending: true });
+  if (err2) throw err2;
+  return rounds.map((r) => ({ ...r, partidos: (matches || []).filter((m) => m.round_id === r.id) }));
+}
+
+export async function generarRondaInicial(escaleraId) {
+  const { data, error } = await supabase.rpc('generar_ronda_inicial', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return data;
+}
+export async function generarSiguienteRonda(escaleraId) {
+  const { data, error } = await supabase.rpc('generar_siguiente_ronda', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return data;
+}
+export async function registrarResultadoPartido(matchId, sets, goldenPointWinner = null) {
+  const { data, error } = await supabase.rpc('registrar_resultado_partido', {
+    p_match_id: matchId, p_sets: sets, p_golden_point_winner: goldenPointWinner,
+  });
+  if (error) throw error;
+  return data;
+}
+export async function corregirResultadoPartido(matchId, sets, nota = null, goldenPointWinner = null) {
+  const { data, error } = await supabase.rpc('corregir_resultado_partido', {
+    p_match_id: matchId, p_sets: sets, p_nota: nota, p_golden_point_winner: goldenPointWinner,
+  });
+  if (error) throw error;
+  return data;
+}
+export async function cerrarEscalera(escaleraId) {
+  const { data, error } = await supabase.rpc('cerrar_escalera', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return data;
+}
+
+/* ============================================================
+   Admin — Liguilla / Ascenso
+   ============================================================ */
+
+export async function getLiguillaEventosAdmin() {
+  const { data, error } = await supabase.from('liguilla_events').select('*').order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+export async function crearEventoLiguilla(monthKey, tier, eventDate = null, escaleraId = null) {
+  const { data, error } = await supabase.rpc('crear_evento_liguilla', {
+    p_month_key: monthKey, p_tier: tier, p_event_date: eventDate, p_escalera_id: escaleraId,
+  });
+  if (error) throw error;
+  return data;
+}
+export async function generarCalificadosLiguilla(eventId, waitlistDepth = 8) {
+  const { data, error } = await supabase.rpc('generar_calificados_liguilla', {
+    p_liguilla_event_id: eventId, p_waitlist_depth: waitlistDepth,
+  });
+  if (error) throw error;
+  return data && data[0] ? data[0] : data;
+}
+export async function getCalificadosLiguillaAdmin(eventId) {
+  const { data, error } = await supabase
+    .from('liguilla_qualifiers')
+    .select('*, profiles(full_name)')
+    .eq('liguilla_event_id', eventId)
+    .order('seed', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+export async function cerrarConfirmacionesLiguilla(eventId, force = false) {
+  const { data, error } = await supabase.rpc('cerrar_confirmaciones_liguilla', {
+    p_liguilla_event_id: eventId, p_force: force,
+  });
+  if (error) throw error;
+  return data && data[0] ? data[0] : data;
+}
+export async function iniciarDraftLiguilla(eventId) {
+  const { data, error } = await supabase.rpc('iniciar_draft_liguilla', { p_liguilla_event_id: eventId });
+  if (error) throw error;
+  return data;
+}
+export async function autogenerarParejasRestantes(eventId, force = false) {
+  const { data, error } = await supabase.rpc('autogenerar_parejas_restantes', {
+    p_liguilla_event_id: eventId, p_force: force,
+  });
+  if (error) throw error;
+  return data;
+}
+export async function cancelarLiguillaSinJugadores(eventId, player1Id = null, player2Id = null) {
+  const { data, error } = await supabase.rpc('cancelar_liguilla_sin_jugadores', {
+    p_liguilla_event_id: eventId, p_player1_id: player1Id, p_player2_id: player2Id,
+  });
+  if (error) throw error;
+  return data;
+}
+export async function generarRonda1Liguilla(eventId) {
+  const { data, error } = await supabase.rpc('generar_ronda1_liguilla', { p_liguilla_event_id: eventId });
+  if (error) throw error;
+  return data;
+}
+export async function registrarResultadoLiguillaMatch(matchId, sets, winnerPairId = null) {
+  const { data, error } = await supabase.rpc('registrar_resultado_liguilla_match', {
+    p_match_id: matchId, p_sets: sets, p_winner_pair_id: winnerPairId,
+  });
+  if (error) throw error;
+  return data && data[0] ? data[0] : data;
+}
+export async function sustituirCalificadoLiguilla(qualifierId, substitutePlayerId = null) {
+  const { data, error } = await supabase.rpc('sustituir_calificado_liguilla', {
+    p_qualifier_id: qualifierId, p_substitute_player_id: substitutePlayerId,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/* ============================================================
+   Maestro — configuración del sistema
+   ============================================================ */
+
+export async function getSystemSettingsAll() {
+  const { data, error } = await supabase.from('system_settings').select('*').order('key', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+export async function updateSystemSetting(key, value) {
+  const { error } = await supabase.from('system_settings').update({ value }).eq('key', key);
+  if (error) throw error;
+}
+export async function getWeekdayScheduleAll() {
+  const { data, error } = await supabase.from('weekday_schedule').select('*').order('weekday', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+export async function updateWeekdaySchedule(id, fields) {
+  const { error } = await supabase.from('weekday_schedule').update(fields).eq('id', id);
+  if (error) throw error;
+}
+export async function getStaff() {
+  const { data, error } = await supabase.from('profiles').select('*').in('role', ['admin', 'maestro']).order('full_name', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+/** Solo el Maestro puede llamar esto con éxito — lo hace cumplir el trigger guard_profile_privileged_fields en la base de datos, no solo la interfaz. */
+export async function setProfileRole(playerId, role) {
+  const { error } = await supabase.from('profiles').update({ role }).eq('id', playerId);
+  if (error) throw error;
+}
+
+/* ============================================================
+   CRM del jugador — multas, suspensiones, notificaciones
+   ============================================================ */
+
+export async function getMisMultas(playerId) {
+  const { data, error } = await supabase.from('fines').select('*').eq('player_id', playerId).order('applied_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+export async function getMisSuspensiones(playerId) {
+  const { data, error } = await supabase.from('suspensions').select('*').eq('player_id', playerId).order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+export async function getMisNotificaciones(playerId, limite = 30) {
+  const { data, error } = await supabase
+    .from('notifications').select('*').eq('player_id', playerId)
+    .order('created_at', { ascending: false }).limit(limite);
+  if (error) throw error;
+  return data;
+}
+export async function marcarNotificacionLeida(notifId) {
+  const { error } = await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', notifId);
+  if (error) throw error;
+}
