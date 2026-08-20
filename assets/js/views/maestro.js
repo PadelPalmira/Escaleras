@@ -2,7 +2,7 @@ import { el, formatHora, toast, humanizeError, confirmSheet } from '../utils.js'
 import {
   getMyProfile, esMaestro,
   getSystemSettingsAll, updateSystemSetting, getWeekdayScheduleAll, updateWeekdaySchedule,
-  getStaff, setProfileRole, buscarJugadores,
+  getStaff, setProfileRole, buscarJugadores, generarEscalerasSemana, getProximasEscaleras,
 } from '../api.js';
 
 const WEEKDAY_LABEL = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', domingo: 'Domingo' };
@@ -26,6 +26,11 @@ export async function renderMaestro() {
     schedCard.appendChild(renderWeekdayRow(ws));
   });
   wrap.appendChild(schedCard);
+
+  wrap.appendChild(el('div', { class: 'section-title' }, 'Convocatorias de la semana'));
+  const convBox = el('div');
+  wrap.appendChild(convBox);
+  await pintarConvocatorias(convBox);
 
   wrap.appendChild(el('div', { class: 'section-title' }, 'Fórmula de puntos y reglas' ));
   const settings = await getSystemSettingsAll();
@@ -128,6 +133,43 @@ function renderSettingRow(s) {
   });
   wrapper.appendChild(saveBtn);
   return wrapper;
+}
+
+async function pintarConvocatorias(box) {
+  box.innerHTML = '<p class="text-tiny">Cargando…</p>';
+  const proximas = await getProximasEscaleras(14);
+  box.innerHTML = '';
+
+  const card = el('div', { class: 'card' });
+  if (!proximas || proximas.length === 0) {
+    card.appendChild(el('p', { class: 'text-muted' }, 'No hay ninguna convocatoria creada para los próximos 14 días — los jugadores no van a poder registrarse todavía.'));
+  } else {
+    card.appendChild(el('p', { class: 'text-tiny mb-3' }, `${proximas.length} convocatoria(s) creada(s) en los próximos 14 días:`));
+    proximas.forEach((e, i) => {
+      if (i > 0) card.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
+      card.appendChild(el('div', { class: 'row-between' }, [
+        el('div', {}, [
+          el('div', { style: 'font-weight:600;' }, `${WEEKDAY_LABEL[e.weekday_schedule?.weekday] || ''} ${e.session_date}`),
+          el('div', { class: 'text-tiny' }, e.weekday_schedule ? `${FORMAT_LABEL[e.weekday_schedule.format] || e.weekday_schedule.format}${e.weekday_schedule.category ? ' · Cat ' + e.weekday_schedule.category : ''}` : ''),
+        ]),
+      ]));
+    });
+  }
+
+  const genBtn = el('button', { class: 'btn btn-secondary btn-sm mt-3', style: 'width:auto;' }, 'Generar convocatorias de esta semana');
+  genBtn.addEventListener('click', async () => {
+    genBtn.disabled = true; genBtn.textContent = 'Generando…';
+    try {
+      const nuevas = await generarEscalerasSemana();
+      toast(nuevas && nuevas.length > 0 ? `Se crearon ${nuevas.length} convocatoria(s) nueva(s).` : 'No había nada nuevo que crear — ya estaban todas.', 'success');
+      await pintarConvocatorias(box);
+      return;
+    } catch (err) { toast(humanizeError(err), 'error'); }
+    genBtn.disabled = false; genBtn.textContent = 'Generar convocatorias de esta semana';
+  });
+  card.appendChild(genBtn);
+  card.appendChild(el('p', { class: 'text-tiny mt-2' }, 'Esto pasa solo, automáticamente, cada domingo a las 10am — este botón es solo por si necesitas forzarlo (p.ej. acabas de activar un horario nuevo a media semana).'));
+  box.appendChild(card);
 }
 
 async function pintarStaff(box) {

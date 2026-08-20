@@ -582,6 +582,19 @@ export async function updateWeekdaySchedule(id, fields) {
   const { error } = await supabase.from('weekday_schedule').update(fields).eq('id', id);
   if (error) throw error;
 }
+/**
+ * Crea las convocatorias (filas reales de `escaleras`, con fecha) de una
+ * semana a partir de weekday_schedule. Corre sola cada domingo 10am CDMX
+ * vía cron, pero el Maestro también puede forzarla manualmente aquí (p.ej.
+ * si acaba de activar un horario nuevo a media semana, o si necesita
+ * confirmar que ya están creadas). Devuelve solo las que se crearon en
+ * esta llamada — si ya existían, no se duplican ni se vuelven a listar.
+ */
+export async function generarEscalerasSemana(weekStart = null) {
+  const { data, error } = await supabase.rpc('generar_escaleras_semana', { p_week_start: weekStart });
+  if (error) throw error;
+  return data;
+}
 export async function getStaff() {
   const { data, error } = await supabase.from('profiles').select('*').in('role', ['admin', 'maestro']).order('full_name', { ascending: true });
   if (error) throw error;
