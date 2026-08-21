@@ -28,6 +28,9 @@ export const icon = {
   ban: svg('<circle cx="12" cy="12" r="9"/><path d="m5.5 5.5 13 13"/>'),
   bell: svg('<path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 1.5 5.5H4.5S6 13 6 9Z"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
-  racket: svg('<circle cx="9.5" cy="9.5" r="6"/><path d="M13.8 13.8 20 20"/>'),
+  // Raqueta de pádel: pala ovalada con perforaciones y grip. La versión
+  // anterior (círculo + línea diagonal) se leía como lupa de búsqueda a
+  // cualquier tamaño — y con los iconos ya visibles, se notaba de más.
+  racket: svg('<path d="M12 2.6c3 0 5.3 2.3 5.3 5.3v3.4c0 2.9-2.4 5.3-5.3 5.3s-5.3-2.4-5.3-5.3V7.9c0-3 2.3-5.3 5.3-5.3Z"/><path d="M12 16.6V21"/><path d="M10.2 21h3.6"/>'),
   whatsapp: svg('<path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z"/><path d="M8.3 8.7c.2-.6.5-.6.8-.6h.5c.2 0 .4 0 .5.4.2.5.6 1.6.7 1.7.1.1.1.3 0 .5-.1.2-.2.3-.3.4l-.4.5c-.1.2-.3.3-.1.6.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.3 2.4 1.5.3.1.5.1.7-.1l.6-.7c.2-.3.4-.2.6-.1l1.5.7c.2.1.3.2.4.3.1.2.1.9-.2 1.4-.3.5-1.4 1.1-2 1.1-.6 0-1.3 0-4.2-1.7-2.9-1.7-3.7-4.6-3.8-4.8-.1-.2-.9-1.4-.9-2.6 0-1.2.6-1.8.8-2Z"/>'),
 };
