@@ -6,6 +6,7 @@ import { registerRoute, initRouter, navigate, currentRoute } from './router.js';
 import { getMyProfile, esAdminOMaestro } from './api.js';
 import { renderLoginScreen } from './views/login.js';
 import { renderCompletarPerfil } from './views/completar_perfil.js';
+import { renderGuiaApp } from './views/guia_app.js';
 import { renderHome } from './views/home.js';
 import { renderRanking } from './views/ranking.js';
 import { renderConvocatorias } from './views/convocatorias.js';
@@ -83,11 +84,33 @@ async function showApp() {
 
   // Nombre completo y celular son obligatorios (además del correo, que ya
   // viene de la cuenta) — si faltan, bloqueamos el resto de la app hasta
-  // completarlos. Cubre tanto cuentas nuevas como perfiles viejos que se
-  // crearon antes de que estos campos fueran requeridos.
+  // completarlos (y de paso, dentro de esa misma pantalla, también se pide
+  // el nivel de juego — ver completar_perfil.js). Cubre tanto cuentas
+  // nuevas como perfiles viejos que se crearon antes de que estos campos
+  // fueran requeridos. A propósito NO se revalida `declared_level` aquí
+  // para cuentas que ya tenían el perfil completo antes de que existiera
+  // este campo (p.ej. el Maestro) — obligarlas a declarar un nivel
+  // retroactivamente repetiría el mismo bug de "pedir datos de nuevo a
+  // cuentas viejas" que ya se corrigió una vez.
   if (profile && (!profile.full_name?.trim() || !profile.phone?.trim())) {
     appEl.innerHTML = '';
-    appEl.appendChild(renderCompletarPerfil(profile, () => showApp()));
+    appEl.appendChild(renderCompletarPerfil(profile, (updatedProfile, recomendacion) => {
+      // Justo después de completar el perfil, un jugador nuevo ve la guía
+      // rápida de la app (con su recomendación de nivel ya integrada) antes
+      // de entrar — es la única vez que la va a ver.
+      appEl.innerHTML = '';
+      appEl.appendChild(renderGuiaApp({ profile: updatedProfile, recomendacion, esNuevo: true, onDone: () => showApp() }));
+    }));
+    return;
+  }
+
+  // Un jugador que ya tenía cuenta de antes de que esta guía existiera la ve
+  // una sola vez, la primera vez que entra tras esta actualización — para
+  // que entienda qué cambió (sobre todo el nuevo sistema de convocatorias y
+  // de cancha 1) sin tener que descubrirlo jugando.
+  if (profile && !profile.app_guide_seen_at) {
+    appEl.innerHTML = '';
+    appEl.appendChild(renderGuiaApp({ profile, recomendacion: null, esNuevo: false, onDone: () => showApp() }));
     return;
   }
 
