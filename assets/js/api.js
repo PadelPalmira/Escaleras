@@ -168,6 +168,36 @@ export async function asignarSustituto(registrationId, sustitutoPlayerId, esCoac
   return data;
 }
 
+/* ---------------- Retas Abiertas: registro social simple ----------------
+   Sin cupo, sin lista de espera, sin puntos ni penalizaciones — solo sirve
+   para que todo el club vea quién va y cuántos, y decidir si se anima. */
+
+/** Registrarme (o volver a anotarme si antes salí) en una noche de Retas Abiertas. */
+export async function registrarseRetasAbiertas(escaleraId) {
+  const { data, error } = await supabase.rpc('registrarse_retas_abiertas', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return data && data[0] ? data[0] : data;
+}
+
+/** Salirme de una noche de Retas Abiertas — nunca aplica penalización. */
+export async function salirRetasAbiertas(registrationId) {
+  const { data, error } = await supabase.rpc('salir_retas_abiertas', { p_registration_id: registrationId });
+  if (error) throw error;
+  return data;
+}
+
+/** Quiénes están anotados (confirmados) en una noche de Retas Abiertas, con nombre. */
+export async function getInscritosRetas(escaleraId) {
+  const { data, error } = await supabase
+    .from('escalera_registrations')
+    .select('id, player_id, confirmed_at, profiles(full_name)')
+    .eq('escalera_id', escaleraId)
+    .eq('status', 'confirmed')
+    .order('confirmed_at', { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
 /* ============================================================
    Reglas
    ============================================================ */

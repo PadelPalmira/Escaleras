@@ -2,7 +2,7 @@ import { el, formatFecha, formatHora, toast, humanizeError, openSheet, confirmSh
 import {
   getMyProfile, getMiCategoria, getProximasEscaleras, getMisRegistros,
   registrarJugador, cancelarRegistro, asignarSustituto, responderInvitacionPareja,
-  getJugadoresParaPareja,
+  getJugadoresParaPareja, registrarseRetasAbiertas, salirRetasAbiertas, getInscritosRetas,
 } from '../api.js';
 
 const FORMAT_LABEL = { individual: 'Individual', parejas: 'Parejas Fijas', retas_abiertas: 'Retas Abiertas' };
@@ -77,8 +77,45 @@ function renderEscaleraCard(esc, miRegistro, profile, onChange) {
   const actions = el('div', { class: 'stack gap-2 mt-4' });
 
   if (ws.format === 'retas_abiertas') {
-    actions.appendChild(el('p', { class: 'text-muted' }, '100% social, sin categoría ni puntos. Avísale a los del grupo que vas — el registro para Retas Abiertas llega pronto en la app.'));
+    const inscrito = miRegistro && miRegistro.status === 'confirmed';
+
+    const social = el('div', { class: 'retas-social mt-3' });
+    const countLine = el('div', { class: 'row gap-2' }, [
+      el('span', { class: 'retas-count-number' }, '···'),
+      el('span', { class: 'text-muted' }, 'anotados esta noche'),
+    ]);
+    const namesLine = el('div', { class: 'text-tiny mt-1' }, 'Cargando…');
+    social.append(countLine, namesLine);
+    card.appendChild(social);
+
+    const btn = el('button', { class: `btn ${inscrito ? 'btn-secondary' : 'btn-primary'}` }, inscrito ? 'Ya estás anotado — salir' : 'Anotarme');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        if (inscrito) {
+          await salirRetasAbiertas(miRegistro.id);
+          toast('Listo, te quitamos de la lista.', 'info');
+        } else {
+          await registrarseRetasAbiertas(esc.id);
+          toast('¡Anotado! Nos vemos el viernes.', 'success');
+        }
+        onChange();
+      } catch (err) {
+        toast(humanizeError(err), 'error');
+        btn.disabled = false;
+      }
+    });
+    actions.appendChild(btn);
+    actions.appendChild(el('p', { class: 'text-tiny text-muted mt-2' }, '100% social, sin categoría ni puntos — anotarte solo sirve para que se vea quién va.'));
     card.appendChild(actions);
+
+    getInscritosRetas(esc.id).then((inscritos) => {
+      countLine.querySelector('.retas-count-number').textContent = String(inscritos.length);
+      namesLine.textContent = inscritos.length
+        ? inscritos.map((r) => (r.profiles?.full_name || 'Jugador').trim().split(' ')[0]).join(', ')
+        : 'Todavía nadie se ha anotado — sé el primero en animar.';
+    }).catch(() => { namesLine.textContent = ''; });
+
     return card;
   }
 

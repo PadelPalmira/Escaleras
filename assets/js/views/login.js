@@ -1,6 +1,7 @@
 import { el, toast, humanizeError } from '../utils.js';
 import { icon } from '../icons.js';
 import { sendMagicLink } from '../api.js';
+import { whatsappHelpUrl } from '../config.js';
 
 // Una sola pantalla de entrada — no existe "regístrate" separado de "inicia
 // sesión". Con correo + enlace mágico basta: si es la primera vez, Supabase
@@ -25,6 +26,10 @@ export function renderLoginScreen() {
 
   const btn = el('button', { class: 'btn btn-primary' }, 'Enviar enlace mágico');
   const status = el('div', { class: 'text-tiny mt-3' });
+  const helpLink = el('a', { class: 'login-help-link', href: whatsappHelpUrl('Hola, tengo una duda para entrar a la app de Escaleras Palmira 🎾'), target: '_blank', rel: 'noopener' }, [
+    el('span', { html: icon.whatsapp }),
+    '¿Problemas para entrar? Escríbenos',
+  ]);
 
   btn.addEventListener('click', async () => {
     const emailInput = document.getElementById('login-email');
@@ -68,6 +73,6 @@ export function renderLoginScreen() {
     if (e.key === 'Enter') btn.click();
   });
 
-  wrap.append(logo, title, sub, emailField, btn, status);
+  wrap.append(logo, title, sub, emailField, btn, status, helpLink);
   return wrap;
 }

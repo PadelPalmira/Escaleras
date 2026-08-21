@@ -8,3 +8,9 @@ export const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_vLRpApr7wqKQQxxWEl1NVA_7
 // Zona horaria oficial del club — TODOS los cortes de tiempo del sistema se
 // muestran/calculan en esta zona, sin importar dónde esté el usuario.
 export const CLUB_TZ = 'America/Mexico_City';
+
+// WhatsApp del club — botón de ayuda/contacto en toda la app.
+export const CLUB_WHATSAPP_NUMBER = '527778798613';
+export function whatsappHelpUrl(mensaje = 'Hola, tengo una duda sobre Escaleras Palmira 🎾') {
+  return `https://wa.me/${CLUB_WHATSAPP_NUMBER}?text=${encodeURIComponent(mensaje)}`;
+}

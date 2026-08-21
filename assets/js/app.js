@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient.js';
 import { el, qs } from './utils.js';
 import { icon } from './icons.js';
+import { whatsappHelpUrl } from './config.js';
 import { registerRoute, initRouter, navigate, currentRoute } from './router.js';
 import { getMyProfile, esAdminOMaestro } from './api.js';
 import { renderLoginScreen } from './views/login.js';
@@ -37,7 +38,12 @@ function buildShell(navItems) {
       el('img', { class: 'brand-logo', src: 'assets/img/logo-icon-white.png', alt: '' }),
       'Escaleras Palmira',
     ]),
-    el('div', { class: 'header-actions' }),
+    el('div', { class: 'header-actions' }, [
+      el('a', {
+        class: 'help-btn', href: whatsappHelpUrl(), target: '_blank', rel: 'noopener',
+        title: 'Ayuda por WhatsApp', 'aria-label': 'Ayuda por WhatsApp',
+      }, [el('span', { html: icon.whatsapp })]),
+    ]),
   ]);
 
   viewEl = el('main', { id: 'view' });

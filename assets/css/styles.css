@@ -368,22 +368,106 @@ textarea.input{ height: auto; padding: var(--sp-3) var(--sp-4); resize: vertical
 .sheet-handle{ width: 36px; height: 4px; border-radius: var(--r-pill); background: var(--border-strong); margin: 0 auto var(--sp-4); }
 .sheet-title{ font-size: 18px; font-weight: 800; margin-bottom: var(--sp-4); }
 
+/* ---------- Retas Abiertas (registro social) ---------- */
+.retas-social{
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.retas-count-number{
+  font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums;
+  background: var(--gradient-brand);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: retas-pop var(--t-med) both;
+}
+@keyframes retas-pop{ from{ opacity: 0; transform: scale(0.7); } to{ opacity: 1; transform: scale(1); } }
+
+/* ---------- Botón de ayuda / WhatsApp ---------- */
+.help-btn{
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  transition: transform var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+}
+.help-btn svg{ width: 19px; height: 19px; stroke: currentColor; }
+.help-btn:active{ transform: scale(0.92); }
+.help-btn:hover{ background: var(--success-dim); box-shadow: 0 0 0 1px rgba(52,211,153,0.35); }
+.login-help-link{
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: var(--sp-7); font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  justify-content: center;
+}
+.login-help-link svg{ width: 16px; height: 16px; color: var(--success); stroke: currentColor; }
+
+/* ---------- Reglas (scroll continuo + animación de aparición) ---------- */
+.reglas-section-icon{
+  flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  color: var(--cyan);
+}
+.reglas-section-icon svg{ width: 18px; height: 18px; stroke: currentColor; stroke-width: 2.1; }
+.reglas-body{ font-size: 13.5px; line-height: 1.68; }
+.reglas-body h3{ font-size: 14.5px; font-weight: 800; color: var(--text-primary); margin: var(--sp-4) 0 var(--sp-2); }
+.reglas-body h3:first-child{ margin-top: 0; }
+.reglas-body h4{ font-size: 13.5px; font-weight: 700; color: var(--text-primary); margin: var(--sp-3) 0 4px; }
+.reglas-body p{ margin: 0 0 var(--sp-2); }
+.reglas-body ul{ margin: 0 0 var(--sp-2); padding-left: 18px; }
+.reglas-body li{ margin-bottom: 4px; }
+.reglas-body strong{ color: var(--text-primary); }
+
+.reveal{ opacity: 0; transform: translateY(20px); transition: opacity 520ms var(--ease), transform 520ms var(--ease); }
+.reveal-in{ opacity: 1; transform: translateY(0); }
+
 /* ---------- Login ---------- */
 .login-screen{
+  position: relative; z-index: 0;
   min-height: 100%; display: flex; flex-direction: column; justify-content: center;
   padding: var(--sp-6);
   max-width: var(--max-w); margin: 0 auto; width: 100%;
 }
+/* Par de "auroras" de marca flotando muy despacio detrás del contenido —
+   detalle sutil de bienvenida, nunca interfiere con la lectura ni el tap. */
+.login-screen::before, .login-screen::after{
+  content: ''; position: absolute; z-index: -1;
+  width: 300px; height: 300px; border-radius: 50%;
+  filter: blur(70px); opacity: 0.28; pointer-events: none;
+}
+.login-screen::before{ background: var(--cyan); top: -110px; left: -90px; animation: aurora-1 15s ease-in-out infinite alternate; }
+.login-screen::after{ background: var(--pink); bottom: -120px; right: -90px; animation: aurora-2 17s ease-in-out infinite alternate; }
+@keyframes aurora-1{ from{ transform: translate(0,0) scale(1); } to{ transform: translate(36px, 26px) scale(1.15); } }
+@keyframes aurora-2{ from{ transform: translate(0,0) scale(1); } to{ transform: translate(-28px,-18px) scale(1.12); } }
+
 .login-logo{
   display: flex; align-items: center; justify-content: center;
   margin-bottom: var(--sp-6);
 }
 .login-logo-img{
   height: 84px; width: auto;
-  filter: drop-shadow(0 0 18px rgba(0,242,234,0.28));
+  animation: logo-in 700ms var(--ease) both, logo-glow 3.6s ease-in-out 700ms infinite;
+}
+@keyframes logo-in{ from{ opacity: 0; transform: scale(0.7) translateY(-10px); } to{ opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes logo-glow{
+  0%, 100%{ filter: drop-shadow(0 0 16px rgba(0,242,234,0.26)); }
+  50%{ filter: drop-shadow(0 0 26px rgba(255,0,193,0.3)); }
 }
 .login-screen .h1{ margin-bottom: var(--sp-2); }
 .login-screen .text-muted{ margin-bottom: var(--sp-7); }
+
+/* Entrada escalonada del contenido — cada elemento aparece un poco después
+   del anterior, de arriba hacia abajo. */
+.login-screen > *{ animation: fade-up 560ms var(--ease) both; }
+.login-screen > *:nth-child(1){ animation-delay: 0ms; }
+.login-screen > *:nth-child(2){ animation-delay: 90ms; }
+.login-screen > *:nth-child(3){ animation-delay: 150ms; }
+.login-screen > *:nth-child(4){ animation-delay: 210ms; }
+.login-screen > *:nth-child(5){ animation-delay: 270ms; }
+.login-screen > *:nth-child(6){ animation-delay: 270ms; }
+.login-screen > *:nth-child(7){ animation-delay: 330ms; }
+.login-screen > *:nth-child(8){ animation-delay: 330ms; }
+@keyframes fade-up{ from{ opacity: 0; transform: translateY(14px); } to{ opacity: 1; transform: translateY(0); } }
 .divider-or{ display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-6) 0; color: var(--text-tertiary); font-size: 12px; }
 .divider-or::before, .divider-or::after{ content: ''; flex: 1; height: 1px; background: var(--border); }
 
