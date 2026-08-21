@@ -19,11 +19,15 @@ import { renderAdminLiguilla } from './views/admin_liguilla.js';
 import { renderAdminJugadores } from './views/admin_jugadores.js';
 import { renderMaestro } from './views/maestro.js';
 
+// La Liguilla tiene pestaña propia porque es la meta del mes para todos:
+// ahí se ve cuándo es, quién va calificado y cuántos puntos te faltan. Las
+// Reglas se mueven a Perfil (se leen una vez, no todos los días) para que la
+// barra no se sature — el reglamento sigue completo, solo cambia de puerta.
 const NAV_ITEMS_BASE = [
   { path: '/inicio', label: 'Inicio', icon: icon.home },
   { path: '/ranking', label: 'Ranking', icon: icon.ranking },
   { path: '/convocatorias', label: 'Convocatorias', icon: icon.calendar },
-  { path: '/reglas', label: 'Reglas', icon: icon.book },
+  { path: '/liguilla', label: 'Liguilla', icon: icon.trophy },
   { path: '/perfil', label: 'Perfil', icon: icon.user },
 ];
 const NAV_ITEM_ADMIN = { path: '/admin', label: 'Admin', icon: icon.shield };
@@ -49,7 +53,10 @@ function buildShell(navItems) {
 
   viewEl = el('main', { id: 'view' });
 
-  navEl = el('nav', { class: 'bottom-nav' });
+  // Con la pestaña de Admin son 6 botones y "Convocatorias" ya no cabe a
+  // tamaño normal en un teléfono angosto: la clase compacta baja la
+  // tipografía lo justo para que ninguna etiqueta se corte.
+  navEl = el('nav', { class: `bottom-nav${navItems.length >= 6 ? ' bottom-nav-compact' : ''}` });
   navItems.forEach((item) => {
     const btn = el('button', {
       class: 'nav-item',

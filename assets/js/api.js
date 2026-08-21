@@ -129,17 +129,45 @@ export async function getJugadoresParaPareja(escaleraId, excluirPlayerId) {
     .neq('id', excluirPlayerId)
     .order('full_name', { ascending: true });
   if (error) throw error;
-  return data;
+  // Un perfil sin nombre no se puede elegir a ciegas: se ve como
+  // "(sin nombre)" en la lista y nadie sabe a quién está escogiendo.
+  return (data || []).filter((j) => (j.full_name || '').trim());
 }
 
 /* ---------------- Acciones (RPC) ---------------- */
 
-export async function registrarJugador(escaleraId, playerId, partnerId = null) {
+/**
+ * Estado completo de las convocatorias de los próximos días para el jugador
+ * de la sesión: cupo, lista de espera, ventana de ventaja del domingo, si
+ * trae ventaja de ranking y cómo está su propio registro. Una sola llamada
+ * en vez de cinco, y toda la lógica de fechas vive en la base de datos —
+ * que es la única que puede decidirla sin que el reloj del teléfono influya.
+ */
+export async function getMisConvocatorias(dias = 9) {
+  const { data, error } = await supabase.rpc('mis_convocatorias', { p_dias: dias });
+  if (error) throw error;
+  return data || [];
+}
+
+/**
+ * @param aListaEspera true = "quiero entrar a la lista de espera", que es la
+ * única forma de anotarse durante la ventana del domingo si no traes ventaja
+ * de ranking. Nunca es automático: el jugador lo tiene que pedir.
+ */
+export async function registrarJugador(escaleraId, playerId, partnerId = null, aListaEspera = false) {
   const { data, error } = await supabase.rpc('registrar_jugador', {
     p_escalera_id: escaleraId,
     p_player_id: playerId,
     p_partner_id: partnerId,
+    p_a_lista_espera: aListaEspera,
   });
+  if (error) throw error;
+  return data && data[0] ? data[0] : data;
+}
+
+/** Qué pasaría si me doy de baja ahorita — alimenta los avisos antes de confirmar. */
+export async function previewCancelacion(registrationId) {
+  const { data, error } = await supabase.rpc('preview_cancelacion', { p_registration_id: registrationId });
   if (error) throw error;
   return data && data[0] ? data[0] : data;
 }
@@ -152,10 +180,16 @@ export async function responderInvitacionPareja(registrationId, aceptar) {
   if (error) throw error;
 }
 
+/**
+ * Devuelve { estado, penalizado, puntos_penalizacion, perdio_ventaja,
+ * cubierto, mensaje }. El mensaje ya viene redactado desde la base de datos
+ * para que app y reglamento nunca digan cosas distintas.
+ */
 export async function cancelarRegistro(registrationId) {
   const { data, error } = await supabase.rpc('cancelar_registro', { p_registration_id: registrationId });
   if (error) throw error;
-  return data;
+  const row = Array.isArray(data) ? data[0] : data;
+  return row || { estado: 'cancelled_ontime', mensaje: 'Listo, te dimos de baja.' };
 }
 
 export async function asignarSustituto(registrationId, sustitutoPlayerId, esCoach = false) {
@@ -163,6 +197,22 @@ export async function asignarSustituto(registrationId, sustitutoPlayerId, esCoac
     p_registration_id: registrationId,
     p_sustituto_player_id: sustitutoPlayerId,
     p_es_coach: esCoach,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Sustituto autorizado por administración, para emergencias reales: entra
+ * alguien en el lugar del ausente SIN reparto de puntos y SIN penalización.
+ * Es la única forma de meter un sustituto en Parejas Fijas, para que la
+ * pareja del ausente no se quede sin jugar.
+ */
+export async function asignarSustitutoAdmin(registrationId, sustitutoPlayerId, motivo = null) {
+  const { data, error } = await supabase.rpc('asignar_sustituto_admin', {
+    p_registration_id: registrationId,
+    p_sustituto_player_id: sustitutoPlayerId,
+    p_motivo: motivo,
   });
   if (error) throw error;
   return data;
@@ -248,6 +298,41 @@ export async function getEventoLiguillaActivo(tiers) {
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Crea (si falta) la Liguilla y el Torneo de Ascenso del mes. Es idempotente
+ * y la fecha sale del horario semanal, no de las convocatorias: por eso el
+ * jugador ve la fecha del mes desde el primer día, aunque las convocatorias
+ * de esa semana todavía no existan.
+ */
+export async function autoprogramarLiguillaMes(monthKey = null) {
+  const { data, error } = await supabase.rpc('autoprogramar_liguilla_mes', { p_month_key: monthKey });
+  if (error) throw error;
+  return data || [];
+}
+
+/** La carrera del mes en vivo: quién va calificado ahorita mismo. */
+export async function getLiguillaTablaVivo(tier, limite = 20) {
+  const { data, error } = await supabase.rpc('liguilla_tabla_vivo', { p_tier: tier, p_limite: limite });
+  if (error) throw error;
+  return data || [];
+}
+
+/** Mi situación personal: lugar, puntos que faltan y si todavía es posible. */
+export async function getMiCarreraLiguilla(tier, playerId = null) {
+  const { data, error } = await supabase.rpc('mi_carrera_liguilla', { p_tier: tier, p_player_id: playerId });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
+}
+
+/** El evento del mes en curso para un tier (si ya está programado). */
+export async function getEventoLiguillaDelMes(tier, monthKey = null) {
+  const mes = monthKey || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' }).slice(0, 7);
+  const { data, error } = await supabase
+    .from('liguilla_events').select('*').eq('tier', tier).eq('month_key', mes).maybeSingle();
   if (error) throw error;
   return data;
 }
@@ -510,6 +595,32 @@ export async function cerrarEscalera(escaleraId) {
   const { data, error } = await supabase.rpc('cerrar_escalera', { p_escalera_id: escaleraId });
   if (error) throw error;
   return data;
+}
+
+/* ---------------- Cupo incompleto ----------------
+   La app no opina hasta que faltan pocas horas (por defecto 6): antes de eso
+   el club prefiere darle tiempo a la lista de espera a llenar los huecos
+   sola. Cuando llega el momento, sugiere por canchas completas — pero la
+   última palabra siempre es del admin. */
+
+export async function getRecomendacionCupo(escaleraId) {
+  const { data, error } = await supabase.rpc('recomendacion_cupo', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
+}
+
+export async function ajustarCanchas(escaleraId, courts, avisar = true) {
+  const { error } = await supabase.rpc('ajustar_canchas_escalera', {
+    p_escalera_id: escaleraId, p_courts: courts, p_avisar: avisar,
+  });
+  if (error) throw error;
+}
+
+export async function cancelarEscaleraAdmin(escaleraId, motivo) {
+  const { error } = await supabase.rpc('cancelar_escalera_admin', {
+    p_escalera_id: escaleraId, p_motivo: motivo,
+  });
+  if (error) throw error;
 }
 
 /* ============================================================

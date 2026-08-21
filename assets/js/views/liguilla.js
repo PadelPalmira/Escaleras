@@ -1,15 +1,16 @@
-import { el, formatFecha, toast, humanizeError, confirmSheet } from '../utils.js';
+import { el, formatFecha, initials, toast, humanizeError, confirmSheet } from '../utils.js';
 import { icon } from '../icons.js';
 import {
   getMyProfile, getMiCategoria, tiersElegiblesPorCategoria, getEventoLiguillaActivo,
   getMiCalificacionLiguilla, getCalificadosConfirmados, getParejasLiguilla, getMiParejaLiguilla,
   getPickActualDraft, getPartidosLiguilla, responderCalificacionLiguilla, hacerPickDraft, responderPickDraft,
+  autoprogramarLiguillaMes, getEventoLiguillaDelMes, getLiguillaTablaVivo, getMiCarreraLiguilla,
 } from '../api.js';
 
 const TIER_LABEL = { liguilla_a: 'Liguilla · Categoría A', ascenso_b: 'Torneo de Ascenso · Categoría B' };
 const EVENT_STATUS_LABEL = {
   scheduled: { text: 'Programado', cls: 'badge-neutral' },
-  qualifying: { text: 'Confirmando calificados', cls: 'badge-warning' },
+  qualifying: { text: 'Confirmando', cls: 'badge-warning' },
   draft_open: { text: 'Draft en curso', cls: 'badge-warning' },
   confirmed: { text: 'Bracket listo', cls: 'badge-success' },
   in_progress: { text: 'En juego', cls: 'badge-success' },
@@ -53,29 +54,43 @@ export async function renderLiguilla() {
     return wrap;
   }
 
-  const evento = await getEventoLiguillaActivo(tiers);
-  if (!evento) {
-    wrap.appendChild(el('div', { class: 'empty-state' }, [
-      el('div', { class: 'emoji' }, '🏆'),
-      el('p', {}, 'No hay Liguilla o Torneo de Ascenso programado todavía para tu categoría este mes.'),
-    ]));
-    return wrap;
+  const tier = tiers[0];
+
+  // La Liguilla del mes se programa sola: la fecha sale del horario semanal
+  // (siempre la última noche de Parejas Fijas del mes de tu categoría), así
+  // que el jugador la ve desde el primer día del mes aunque las
+  // convocatorias de esa semana todavía no existan.
+  let eventoMes = null;
+  try {
+    await autoprogramarLiguillaMes();
+    eventoMes = await getEventoLiguillaDelMes(tier);
+  } catch (err) {
+    console.error('No se pudo programar/leer la Liguilla del mes:', err);
   }
 
-  const st = EVENT_STATUS_LABEL[evento.status] || { text: evento.status, cls: 'badge-neutral' };
-  wrap.appendChild(
-    el('div', { class: 'card card-hero mb-4' }, [
-      el('div', { class: 'row-between' }, [
-        el('div', { class: 'h2' }, TIER_LABEL[evento.tier] || evento.tier),
-        el('span', { class: `badge ${st.cls}` }, st.text),
-      ]),
-      evento.event_date ? el('p', { class: 'text-muted mt-2' }, formatFecha(evento.event_date)) : null,
-    ])
-  );
+  wrap.appendChild(await renderCarreraDelMes(tier, eventoMes, profile, () => refresh(wrap)));
 
   async function refresh(oldWrap) {
     const fresh = await renderLiguilla();
     oldWrap.replaceWith(fresh);
+  }
+
+  const evento = await getEventoLiguillaActivo(tiers);
+  if (!evento) return wrap;
+
+  // La tarjeta de arriba ya dice cuándo es y cómo va la carrera; esta solo
+  // aparece cuando la edición ya arrancó de verdad, para no repetir lo mismo.
+  if (evento.status !== 'scheduled') {
+    const st = EVENT_STATUS_LABEL[evento.status] || { text: evento.status, cls: 'badge-neutral' };
+    wrap.appendChild(
+      el('div', { class: 'card card-hero mb-4' }, [
+        el('div', { class: 'row-between' }, [
+          el('div', { class: 'h2' }, TIER_LABEL[evento.tier] || evento.tier),
+          el('span', { class: `badge ${st.cls}` }, st.text),
+        ]),
+        evento.event_date ? el('p', { class: 'text-muted mt-2' }, formatFecha(evento.event_date)) : null,
+      ])
+    );
   }
 
   const misCalificacion = await getMiCalificacionLiguilla(evento.id, profile.id);
@@ -94,6 +109,121 @@ export async function renderLiguilla() {
   wrap.appendChild(el('p', { class: 'text-tiny mt-6', style: 'text-align:center;' }, 'Esta pantalla no se actualiza sola — usa "Actualizar" arriba para ver movimientos nuevos.'));
 
   return wrap;
+}
+
+/* ============================================================
+   La carrera del mes, en vivo. Es lo primero que ve el jugador:
+   cuándo es la Liguilla, cómo va él, y quiénes van calificados
+   ahorita mismo — que es lo que de verdad motiva a venir a jugar.
+   ============================================================ */
+async function renderCarreraDelMes(tier, eventoMes, profile, onChange) {
+  const wrap = el('div', { class: 'mb-4' });
+
+  const titulo = tier === 'liguilla_a' ? 'Liguilla · Categoría A' : 'Torneo de Ascenso · Categoría B';
+  const hero = el('div', { class: 'card card-hero' });
+  hero.appendChild(el('div', { class: 'row-between' }, [
+    el('div', { class: 'h2' }, [
+      el('span', { html: icon.trophy, style: 'width:18px;height:18px;vertical-align:-3px;margin-right:7px;color:var(--cyan);' }),
+      titulo,
+    ]),
+  ]));
+  if (eventoMes && eventoMes.event_date) {
+    hero.appendChild(el('p', { class: 'mt-2', style: 'font-weight:700;font-size:15px;' }, formatFecha(eventoMes.event_date)));
+    hero.appendChild(el('p', { class: 'text-tiny mt-1' }, diasRestantes(eventoMes.event_date)));
+  } else {
+    hero.appendChild(el('p', { class: 'text-muted mt-2' }, 'La fecha de este mes se publica en cuanto arranque el mes.'));
+  }
+  hero.appendChild(el('p', { class: 'text-tiny mt-3', style: 'color:var(--text-tertiary);' },
+    'Califican los 12 mejores del ranking de tu categoría al cierre del mes.'));
+  wrap.appendChild(hero);
+
+  // Mi situación personal.
+  try {
+    const c = await getMiCarreraLiguilla(tier);
+    if (c) {
+      const card = el('div', { class: `card mt-3 ${c.ya_calificado ? 'carrera-dentro' : 'carrera-fuera'}` });
+      card.appendChild(el('div', { class: 'row-between' }, [
+        el('div', { style: 'font-weight:800;font-size:15px;' }, c.titulo || ''),
+        c.mi_rank != null ? el('span', { class: `badge ${c.ya_calificado ? 'badge-success' : 'badge-warning'}` },
+          c.ya_calificado ? 'Calificado' : 'Fuera del top') : null,
+      ]));
+      card.appendChild(el('p', { class: 'text-tiny mt-2' }, c.mensaje || ''));
+
+      if (c.mi_rank != null) {
+        card.appendChild(el('div', { class: 'grid-3 mt-4' }, [
+          el('div', { class: 'stat-tile' }, [
+            el('div', { class: 'stat-value' }, `#${c.mi_rank}`),
+            el('div', { class: 'stat-label' }, 'Tu lugar'),
+          ]),
+          el('div', { class: 'stat-tile' }, [
+            el('div', { class: 'stat-value' }, Number(c.mis_puntos || 0).toFixed(0)),
+            el('div', { class: 'stat-label' }, 'Tus puntos'),
+          ]),
+          el('div', { class: 'stat-tile' }, [
+            // Sin nadie en el lugar 13 todavía no hay "colchón" que medir:
+            // poner un número ahí sería inventarse una ventaja que no existe.
+            el('div', { class: 'stat-value' }, c.margen == null
+              ? '—'
+              : (c.ya_calificado ? `+${Number(c.margen).toFixed(0)}` : Number(c.margen).toFixed(0))),
+            el('div', { class: 'stat-label' }, c.ya_calificado ? 'De colchón' : 'Te faltan'),
+          ]),
+        ]));
+      }
+      if (!c.ya_calificado && c.aun_posible === false) {
+        card.appendChild(el('div', { class: 'aviso aviso-warn mt-3' },
+          'Matemáticamente ya es muy difícil este mes — pero los puntos de la ventana móvil se renuevan, así que el mes que entra arrancas de nuevo.'));
+      }
+      wrap.appendChild(card);
+    }
+  } catch (err) {
+    console.error('No se pudo calcular tu carrera de Liguilla:', err);
+  }
+
+  // Tabla en vivo.
+  try {
+    const tabla = await getLiguillaTablaVivo(tier, 20);
+    if (tabla.length) {
+      wrap.appendChild(el('div', { class: 'section-title' }, 'Cómo va la carrera ahorita'));
+      const list = el('div', { class: 'card' });
+      let corteDibujado = false;
+      tabla.forEach((r, i) => {
+        if (!r.calificado && !corteDibujado) {
+          corteDibujado = true;
+          list.appendChild(el('div', { class: 'corte-liguilla' }, 'Línea de corte — de aquí para abajo, fuera'));
+        } else if (i > 0) {
+          list.appendChild(el('hr', { class: 'sep', style: 'margin:9px 0;' }));
+        }
+        const soyYo = r.player_id === profile.id;
+        list.appendChild(
+          el('div', { class: `row-between${soyYo ? ' text-cyan' : ''}`, style: soyYo ? 'font-weight:800;' : '' }, [
+            el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
+              el('span', { class: 'rank-num' }, String(r.rnk)),
+              el('span', { class: 'avatar-mini' }, initials(r.full_name)),
+              el('span', {}, r.full_name || 'Jugador'),
+            ]),
+            el('span', { style: 'font-variant-numeric:tabular-nums;' }, Number(r.rolling_points || 0).toFixed(0)),
+          ])
+        );
+      });
+      wrap.appendChild(list);
+      wrap.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' },
+        'Se calcula en vivo con tus últimas escaleras. Cada noche que se juega, la tabla se mueve.'));
+    }
+  } catch (err) {
+    console.error('No se pudo cargar la tabla de la carrera:', err);
+  }
+
+  return wrap;
+}
+
+function diasRestantes(fechaISO) {
+  const hoy = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' }) + 'T00:00:00Z');
+  const dia = new Date(fechaISO + 'T00:00:00Z');
+  const dias = Math.round((dia - hoy) / 86400000);
+  if (dias < 0) return 'Ya se jugó.';
+  if (dias === 0) return '¡Es hoy!';
+  if (dias === 1) return 'Es mañana.';
+  return `Faltan ${dias} días.`;
 }
 
 function renderSeccionCalificacion(misCalificacion, evento, onChange) {

@@ -4,7 +4,8 @@ import {
   getMyProfile, esAdminOMaestro,
   getEscalerasAdmin, getRegistrosEscalera, getRondasConPartidos,
   generarRondaInicial, generarSiguienteRonda, registrarResultadoPartido, corregirResultadoPartido, cerrarEscalera,
-  marcarNoShow, cancelarRegistro, asignarSustituto, buscarJugadores,
+  marcarNoShow, cancelarRegistro, asignarSustituto, asignarSustitutoAdmin, buscarJugadores,
+  getRecomendacionCupo, ajustarCanchas, cancelarEscaleraAdmin,
 } from '../api.js';
 import { navigate } from '../router.js';
 
@@ -94,6 +95,16 @@ async function pintarDetalle(wrap, escaleraId) {
     return;
   }
 
+  // ---- Cupo ----
+  if (esc.status !== 'completed' && esc.status !== 'cancelled') {
+    try {
+      const rec = await getRecomendacionCupo(escaleraId);
+      if (rec) wrap.appendChild(renderPanelCupo(esc, rec, refresh));
+    } catch (err) {
+      console.error('No se pudo calcular la recomendación de cupo:', err);
+    }
+  }
+
   // ---- Roster ----
   wrap.appendChild(el('div', { class: 'section-title' }, `Jugadores registrados (${registros.length})`));
   if (registros.length === 0) {
@@ -113,7 +124,7 @@ async function pintarDetalle(wrap, escaleraId) {
       rosterCard.appendChild(row);
       if (['confirmed', 'substitute'].includes(r.status)) {
         const acciones = el('div', { class: 'btn-row mt-2' }, [
-          el('button', { class: 'btn btn-secondary btn-sm', onclick: () => abrirSustituto(r, refresh) }, 'Sustituto'),
+            el('button', { class: 'btn btn-secondary btn-sm', onclick: () => abrirSustituto(r, refresh, ws.format) }, 'Sustituto'),
           el('button', { class: 'btn btn-secondary btn-sm', onclick: async () => {
             const ok = await confirmSheet({ title: '¿Marcar no-show?', body: 'Aplica la penalización de no-show configurada del mes en curso.', confirmLabel: 'Sí, marcar', danger: true });
             if (!ok) return;
@@ -305,20 +316,173 @@ function construirSets(set1, set2, set3) {
   return sets;
 }
 
-async function abrirSustituto(registro, onChange) {
+/* ============================================================
+   Cupo incompleto. La app no opina hasta que faltan pocas horas
+   (por defecto 6): antes de eso conviene dejar que la lista de
+   espera llene los huecos sola. Cuando llega el momento sugiere
+   por canchas completas — 4 jugadores = 1 cancha — pero la
+   decisión siempre la toma el admin, nunca el sistema.
+   ============================================================ */
+const AVISO_POR_ACCION = {
+  completo: 'aviso-ok',
+  esperar: 'aviso-neutral',
+  reducir: 'aviso-warn',
+  cancelar: 'aviso-danger',
+  na: 'aviso-neutral',
+};
+
+function renderPanelCupo(esc, rec, refresh) {
+  const box = el('div', { class: 'mt-4' });
+  box.appendChild(el('div', { class: 'section-title', style: 'margin-top:0;' }, 'Cupo de la noche'));
+
+  const card = el('div', { class: 'card' });
+  card.appendChild(el('div', { class: 'grid-3' }, [
+    el('div', { class: 'stat-tile' }, [
+      el('div', { class: 'stat-value' }, String(rec.confirmados)),
+      el('div', { class: 'stat-label' }, `de ${rec.capacidad || 12}`),
+    ]),
+    el('div', { class: 'stat-tile' }, [
+      el('div', { class: 'stat-value' }, String(rec.en_lista_espera)),
+      el('div', { class: 'stat-label' }, 'Esperando'),
+    ]),
+    el('div', { class: 'stat-tile' }, [
+      el('div', { class: 'stat-value' }, `${Number(rec.horas_faltantes) > 0 ? Number(rec.horas_faltantes).toFixed(0) : 0}h`),
+      el('div', { class: 'stat-label' }, 'Para empezar'),
+    ]),
+  ]));
+
+  card.appendChild(el('div', { class: `aviso ${AVISO_POR_ACCION[rec.accion] || 'aviso-neutral'} mt-4` }, [
+    el('strong', {}, rec.titulo + ' '),
+    rec.detalle,
+  ]));
+
+  if (rec.accion === 'na' || rec.accion === 'completo') {
+    box.appendChild(card);
+    return box;
+  }
+
+  card.appendChild(el('p', { class: 'text-tiny mt-3', style: 'color:var(--text-tertiary);' },
+    `Ahorita está configurada con ${rec.canchas_actuales} cancha(s). Tú decides: la sugerencia es solo una ayuda.`));
+
+  const fila = el('div', { class: 'stack gap-2 mt-3' });
+
+  // Mientras todavía falta tiempo, las acciones quedan guardadas detrás de
+  // un toque. No es para esconderlas: es para que la pantalla no empuje a
+  // recortar canchas cuando la lista de espera todavía puede llenar el cupo.
+  if (rec.accion === 'esperar') {
+    fila.style.display = 'none';
+    const verMas = el('button', {
+      class: 'btn btn-ghost btn-sm mt-2',
+      onclick: () => {
+        fila.style.display = '';
+        verMas.remove();
+      },
+    }, 'Ajustar canchas o cancelar de todos modos');
+    card.appendChild(verMas);
+  }
+  for (let n = 1; n <= (rec.canchas_maximas || 3); n++) {
+    if (n === rec.canchas_actuales) continue;
+    const sugerida = n === rec.canchas_sugeridas;
+    const btn = el('button', { class: `btn btn-sm ${sugerida ? 'btn-primary' : 'btn-secondary'}` },
+      `Jugar con ${n} cancha${n > 1 ? 's' : ''}${sugerida ? ' · sugerido' : ''}`);
+    btn.addEventListener('click', async () => {
+      const ok = await confirmSheet({
+        title: `¿Jugar con ${n} cancha${n > 1 ? 's' : ''}?`,
+        body: 'Se le avisa automáticamente a todos los jugadores confirmados. Su lugar no se pierde.',
+        confirmLabel: 'Sí, ajustar',
+      });
+      if (!ok) return;
+      try { await ajustarCanchas(esc.id, n, true); toast('Listo, y ya se les avisó a los jugadores.', 'success'); refresh(); }
+      catch (err) { toast(humanizeError(err), 'error', 6000); }
+    });
+    fila.appendChild(btn);
+  }
+
+  const btnCancelar = el('button', { class: 'btn btn-danger btn-sm' },
+    rec.accion === 'cancelar' ? 'Cancelar la sesión · sugerido' : 'Cancelar la sesión');
+  btnCancelar.addEventListener('click', async () => {
+    const ok = await confirmSheet({
+      title: '¿Cancelar la sesión de esta noche?',
+      body: 'Se libera a todos los registrados sin penalización, nadie pierde puntos y se les avisa automáticamente. Esto no se puede deshacer desde la app.',
+      confirmLabel: 'Sí, cancelar la sesión',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await cancelarEscaleraAdmin(esc.id, 'No se junto el cupo minimo');
+      toast('Sesión cancelada y jugadores avisados.', 'success');
+      refresh();
+    } catch (err) { toast(humanizeError(err), 'error', 6000); }
+  });
+  fila.appendChild(btnCancelar);
+  card.appendChild(fila);
+
+  box.appendChild(card);
+  return box;
+}
+
+/* ============================================================
+   Tres modos de sustituto, porque no son la misma situación:
+   - Normal: el ausente conserva 66% y el sustituto gana 34%.
+   - Coach: nadie gana puntos y el ausente sí recibe su penalización.
+   - Emergencia autorizada: el sustituto se lleva 100% y el ausente no
+     recibe puntos NI penalización. Es el único que funciona en Parejas
+     Fijas, justo para que el compañero del ausente no se quede sin jugar.
+   ============================================================ */
+const MODOS_SUSTITUTO = [
+  {
+    key: 'normal', etiqueta: 'Reparto normal (66% / 34%)',
+    info: 'El sustituto recibe el 34% de los puntos ganados y el ausente conserva el 66%. No hay penalización por tiempo.',
+  },
+  {
+    key: 'coach', etiqueta: 'Coach del club cubriendo',
+    info: 'El coach no acumula puntos del club y el ausente recibe la penalización completa según el tiempo de aviso, igual que si no hubiera conseguido sustituto.',
+  },
+  {
+    key: 'emergencia', etiqueta: 'Emergencia autorizada — sin reparto',
+    info: 'Para emergencias reales (médicas, etc.). El sustituto se lleva el 100% de lo que gane porque sí jugó, y al ausente esa noche no le cuenta: cero puntos y cero penalización. Es el único modo que funciona en Parejas Fijas, para que su compañero no se quede sin jugar.',
+  },
+];
+
+async function abrirSustituto(registro, onChange, formato) {
   const content = el('div');
   content.appendChild(el('div', { class: 'sheet-title' }, 'Asignar sustituto'));
-  let esCoach = false;
-  const infoTxt = el('p', { class: 'text-muted mb-3' }, 'El sustituto recibe 34% de los puntos ganados; el ausente conserva 66%.');
+
+  const esParejas = formato === 'parejas';
+  let modo = esParejas ? 'emergencia' : 'normal';
+
+  const infoTxt = el('p', { class: 'text-muted mb-3' }, MODOS_SUSTITUTO.find((m) => m.key === modo).info);
   content.appendChild(infoTxt);
-  const coachToggle = el('button', { class: 'chip-btn mb-3' }, '☐ Es un coach del club cubriendo una emergencia');
-  coachToggle.addEventListener('click', () => {
-    esCoach = !esCoach;
-    coachToggle.classList.toggle('selected', esCoach);
-    coachToggle.textContent = esCoach ? '☑ Es un coach del club cubriendo una emergencia' : '☐ Es un coach del club cubriendo una emergencia';
-    infoTxt.textContent = esCoach ? 'El coach no gana puntos; el ausente recibe la penalización completa por tiempo.' : 'El sustituto recibe 34% de los puntos ganados; el ausente conserva 66%.';
+
+  const motivoInput = el('input', {
+    class: 'input mb-3', type: 'text',
+    placeholder: 'Motivo (opcional) — p. ej. emergencia médica',
+    style: modo === 'emergencia' ? '' : 'display:none;',
   });
-  content.appendChild(coachToggle);
+
+  const grupo = el('div', { class: 'stack gap-2 mb-3' });
+  const botones = MODOS_SUSTITUTO.map((m) => {
+    const b = el('button', { class: `chip-btn${m.key === modo ? ' selected' : ''}` }, m.etiqueta);
+    b.addEventListener('click', () => {
+      if (esParejas && m.key !== 'emergencia') {
+        toast('En Parejas Fijas solo aplica el sustituto de emergencia autorizado.', 'info', 5000);
+        return;
+      }
+      modo = m.key;
+      botones.forEach((x, idx) => x.classList.toggle('selected', MODOS_SUSTITUTO[idx].key === modo));
+      infoTxt.textContent = m.info;
+      motivoInput.style.display = modo === 'emergencia' ? '' : 'none';
+    });
+    grupo.appendChild(b);
+    return b;
+  });
+  content.appendChild(grupo);
+
+  if (esParejas) {
+    content.appendChild(el('div', { class: 'aviso aviso-warn mb-3' },
+      'Esta noche es de Parejas Fijas: normalmente se cae la pareja completa. Meter un sustituto aquí es una decisión tuya y no le cuesta puntos ni penalización a nadie.'));
+  }
+  content.appendChild(motivoInput);
 
   const search = el('input', { class: 'input mb-3', type: 'text', placeholder: 'Buscar jugador…' });
   const list = el('div', { class: 'stack gap-2', style: 'max-height:36vh;overflow-y:auto;' });
@@ -326,16 +490,24 @@ async function abrirSustituto(registro, onChange) {
     list.innerHTML = '<p class="text-tiny">Buscando…</p>';
     const jugadores = await buscarJugadores(filtro, 20);
     list.innerHTML = '';
-    jugadores.filter((j) => j.id !== registro.player_id).forEach((j) => {
+    jugadores
+      .filter((j) => j.id !== registro.player_id && (j.full_name || '').trim())
+      .forEach((j) => {
       list.appendChild(el('button', {
         class: 'chip-btn',
-        onclick: async () => {
+        onclick: async (e) => {
+          e.target.disabled = true;
           try {
-            await asignarSustituto(registro.id, j.id, esCoach);
-            toast(`${j.full_name} jugará en su lugar.`, 'success');
+            if (modo === 'emergencia') {
+              await asignarSustitutoAdmin(registro.id, j.id, motivoInput.value.trim() || null);
+              toast(`${j.full_name} juega en su lugar, sin reparto de puntos ni penalización.`, 'success', 5200);
+            } else {
+              await asignarSustituto(registro.id, j.id, modo === 'coach');
+              toast(`${j.full_name} jugará en su lugar.`, 'success');
+            }
             handle.close();
             onChange();
-          } catch (err) { toast(humanizeError(err), 'error'); }
+          } catch (err) { toast(humanizeError(err), 'error', 6000); e.target.disabled = false; }
         },
       }, j.full_name || '(sin nombre)'));
     });

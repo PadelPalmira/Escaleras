@@ -178,6 +178,29 @@ main#view{
   transition: color var(--t-fast);
   position: relative;
 }
+/* ---------- Iconos SVG inyectados ----------
+   icons.js escribe los <svg> sin width/height y sin `stroke`, así que por
+   sí solos ocupan el tamaño por defecto de un SVG (300x150) y se dibujan
+   invisibles, porque `stroke` no se hereda del padre. Funcionaban solo en
+   los pocos lugares con una regla propia (.nav-item svg, .help-btn svg…);
+   en cualquier otro lado abrían un hueco enorme en la tarjeta. Estas dos
+   reglas lo arreglan de raíz para toda la app: el <span> que envuelve un
+   icono se convierte en una caja del tamaño que le pidan, y el icono la
+   llena tomando el color del texto. Las reglas específicas de antes siguen
+   ganando por especificidad, así que nada cambia donde ya se veía bien. */
+svg{ stroke: currentColor; }
+span:has(> svg){
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; line-height: 0;
+}
+span:has(> svg) > svg{ width: 100%; height: 100%; display: block; }
+
+.nav-item span:last-child{
+  white-space: nowrap; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.bottom-nav-compact .nav-item{ font-size: 9px; letter-spacing: -0.02em; gap: 2px; }
+.bottom-nav-compact .nav-item svg{ width: 20px; height: 20px; }
 .nav-item svg{ width: 22px; height: 22px; stroke: currentColor; transition: transform var(--t-fast); }
 .nav-item.active{ color: var(--text-primary); }
 .nav-item.active svg{ transform: translateY(-1px); }
@@ -383,6 +406,84 @@ textarea.input{ height: auto; padding: var(--sp-3) var(--sp-4); resize: vertical
 }
 @keyframes retas-pop{ from{ opacity: 0; transform: scale(0.7); } to{ opacity: 1; transform: scale(1); } }
 
+.retas-precio{
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--gradient-brand-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+}
+.retas-precio-monto{
+  font-size: 26px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
+  background: var(--gradient-brand);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+/* Tarjeta que además es botón de navegación (p. ej. "Reglamento completo"). */
+.fila-enlace{
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  width: 100%; text-align: left; color: inherit; font: inherit;
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.fila-enlace:active{ background: var(--surface-hover); }
+.fila-enlace:hover{ border-color: var(--border-strong); }
+
+/* ---------- Avisos en línea (reglas que el jugador debe ver) ----------
+   Se usan mucho en Convocatorias: la versión 2.0 cambió cómo se reparten
+   los lugares, y la regla tiene que estar donde se toma la decisión, no
+   escondida en el reglamento. */
+.aviso{
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  font-size: 12.5px; line-height: 1.45;
+  color: var(--text-secondary);
+}
+.aviso strong{ color: var(--text-primary); }
+.aviso-ok{ background: var(--success-dim); border-color: rgba(52,211,153,0.32); }
+.aviso-info{ background: var(--cyan-dim); border-color: rgba(0,242,234,0.30); }
+.aviso-warn{ background: var(--warning-dim); border-color: rgba(251,191,36,0.32); }
+.aviso-danger{ background: var(--danger-dim); border-color: rgba(251,113,133,0.32); }
+.aviso-neutral{ background: var(--surface-2); }
+
+/* ---------- Barra de cupo ---------- */
+.cupo-bar{
+  height: 6px; border-radius: var(--r-pill);
+  background: var(--surface-2); overflow: hidden;
+}
+.cupo-bar-fill{
+  height: 100%; border-radius: var(--r-pill);
+  background: var(--gradient-brand);
+  transition: width var(--t-med);
+  min-width: 2px;
+}
+.cupo-bar-fill.full{ background: var(--success); }
+
+/* ---------- Carrera de la Liguilla ---------- */
+.carrera-dentro{ border-color: rgba(52,211,153,0.40); }
+.carrera-fuera{ border-color: rgba(251,191,36,0.40); }
+.corte-liguilla{
+  display: flex; align-items: center; gap: var(--sp-3);
+  margin: var(--sp-4) 0 var(--sp-3);
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--warning);
+}
+.corte-liguilla::before, .corte-liguilla::after{
+  content: ''; flex: 1; height: 1px; background: rgba(251,191,36,0.35);
+}
+.rank-num{
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; font-size: 11.5px; font-weight: 700;
+  color: var(--text-tertiary); font-variant-numeric: tabular-nums;
+}
+.avatar-mini{
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%; flex: 0 0 26px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  font-size: 10px; font-weight: 700; color: var(--text-secondary);
+}
+
 /* ---------- Botón de ayuda / WhatsApp ---------- */
 .help-btn{
   display: inline-flex; align-items: center; justify-content: center;
@@ -544,8 +645,25 @@ textarea.input{ height: auto; padding: var(--sp-3) var(--sp-4); resize: vertical
 
 hr.sep{ border: none; border-top: 1px solid var(--border); margin: var(--sp-5) 0; }
 
+/* En pantallas anchas el contenido se limita al ancho de un teléfono. El
+   encabezado y la barra de abajo llevaban max-width pero no se centraban,
+   así que en una laptop el logo quedaba pegado a la izquierda y los tabs
+   estirados a todo lo ancho, desalineados del contenido. */
 @media (min-width: 640px){
-  .app-header, main#view, .bottom-nav > .nav-inner{ max-width: var(--max-w); }
+  /* El encabezado es sticky (no fixed): se centra con margen automático,
+     que sí funciona en el flujo normal, no con left/transform. */
+  .app-header{ max-width: var(--max-w); width: 100%; margin-inline: auto; }
+  main#view{ max-width: var(--max-w); }
+  .bottom-nav{
+    /* width:100% es indispensable: al soltar `right` un elemento fijo se
+       encoge al ancho de su contenido y la barra quedaba de 271px. */
+    width: 100%; max-width: var(--max-w);
+    left: 50%; right: auto;
+    transform: translateX(-50%);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+  }
 }
 
 /* Respeta la preferencia de movimiento reducido del sistema: quita

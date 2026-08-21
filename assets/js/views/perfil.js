@@ -1,12 +1,18 @@
 import { el, initials, formatFecha, formatFechaHora, formatPuntos, toast, humanizeError } from '../utils.js';
 import { icon } from '../icons.js';
+import { navigate } from '../router.js';
 import {
   getMyProfile, updateMyProfile, getMiHistorialPuntos, signOut,
   getMisMultas, getMisSuspensiones, getMisNotificaciones, marcarNotificacionLeida,
 } from '../api.js';
 
 const FINE_STATUS = { pending: { text: 'Pendiente', cls: 'badge-warning' }, paid: { text: 'Pagada', cls: 'badge-success' }, waived: { text: 'Condonada', cls: 'badge-neutral' } };
-const NOTIF_URGENT = new Set(['confirmacion_requerida', 'sustituto_encontrado', 'multa_aplicada', 'suspension']);
+const NOTIF_URGENT = new Set([
+  'confirmacion_requerida', 'sustituto_encontrado', 'multa_aplicada', 'suspension',
+  // Fase 6 — cosas que cambian el lugar del jugador y no puede enterarse tarde.
+  'privilegio_perdido', 'preferencia_expirada', 'promocion_lista_espera',
+  'pareja_cancelada', 'escalera_cancelada', 'invitacion_pareja',
+]);
 
 const REASON_LABEL = {
   match_result: 'Resultado de partido',
@@ -37,6 +43,25 @@ export async function renderPerfil() {
       el('div', { class: 'h2' }, profile.full_name || 'Sin nombre'),
       el('div', { class: 'text-tiny mt-1' }, profile.email),
       profile.status !== 'active' ? el('span', { class: 'badge badge-warning mt-2' }, profile.status === 'suspended' ? 'Suspendido' : 'Inactivo') : null,
+    ])
+  );
+
+  // Acceso al reglamento. Ya no tiene pestaña propia (la barra de abajo se
+  // la quedó la Liguilla), así que vive aquí y en Inicio — bien visible, no
+  // enterrado: en la versión 2.0 cambiaron reglas importantes.
+  wrap.appendChild(
+    el('button', {
+      class: 'card mt-3 fila-enlace',
+      onclick: () => navigate('/reglas'),
+    }, [
+      el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
+        el('span', { html: icon.book, style: 'width:19px;height:19px;color:var(--cyan);' }),
+        el('div', {}, [
+          el('div', { style: 'font-weight:700;font-size:14px;' }, 'Reglamento completo'),
+          el('div', { class: 'text-tiny mt-1' }, 'Cómo se juega, puntos, categorías y penalizaciones'),
+        ]),
+      ]),
+      el('span', { html: icon.chevronRight, style: 'width:18px;height:18px;color:var(--text-tertiary);' }),
     ])
   );
 
