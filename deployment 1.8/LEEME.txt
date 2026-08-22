@@ -1,0 +1,54 @@
+DEPLOYMENT 1.8 — Escaleras Palmira 2.0
+=======================================
+
+QUE SUBIR A GITHUB
+------------------
+Un solo archivo. Arrastralo respetando la ruta:
+
+  assets/js/views/convocatorias.js   ->   assets/js/views/convocatorias.js
+
+No hay cambios de base de datos en este deployment.
+
+
+QUE CAMBIA
+----------
+
+1) Se corrige como se explica el formato INDIVIDUAL.
+
+   Antes decia "Juegas solo", que no es cierto. El texto nuevo es:
+
+     "Te anotas solo, pero siempre juegas en pareja: la app te asigna
+      companero en cada ronda y tu companero anterior pasa a ser tu rival.
+      Suben o bajan de cancha juntos segun ganen o pierdan. Si no puedes
+      ir, tu mismo eliges tu sustituto."
+
+   IMPORTANTE: el motor de emparejamiento SIEMPRE estuvo bien. Lo unico
+   que estaba mal era el texto que leia el jugador. No se toco la logica.
+
+2) Aviso honesto cuando todavia no hay ranking.
+
+   En el arranque del club la ventana del domingo no aplica (no hay top 12
+   que premiar). Antes la app decia "ya se acabo la preferencia por
+   ranking", que es mentira: nunca empezo. Ahora sale un aviso arriba de
+   la lista, UNA sola vez:
+
+     "Todavia no hay ranking suficiente. La ventaja del top 12 para
+      apartar lugar el domingo arranca cuando el club lleve varias
+      noches jugadas. Mientras tanto, todas estas convocatorias son
+      para todos por orden de llegada."
+
+   Se muestra arriba y no dentro de cada tarjeta, para no repetir el
+   mismo parrafo 4 veces en la misma pantalla.
+
+   Cuando el club ya tenga historial, el aviso desaparece solo y vuelve
+   el mensaje normal de la ventana del domingo. No hay que activar nada.
+
+
+QA
+--
+Probado en navegador real (Chromium) contra la app completa:
+  - 15/15 pruebas nuevas de esta version (texto de Individual, aviso de
+    sin-ranking, que NO se repita, que no salga cuando si hay ranking)
+  - 17/17 pruebas de flujos de convocatorias
+  - 19/19 pruebas de panel de admin
+  - 0 errores de consola, 0 desbordes horizontales a 320 / 390 / 768 px
