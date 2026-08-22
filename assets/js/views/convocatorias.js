@@ -12,7 +12,7 @@ const FORMAT_LABEL = { individual: 'Individual', parejas: 'Parejas Fijas', retas
 // Las dos dinámicas son distintas de verdad, no solo de nombre — así que la
 // app lo dice en cada tarjeta en vez de dar por hecho que el jugador ya lo sabe.
 const FORMAT_HINT = {
-  individual: 'Juegas solo. Cada ronda te toca compañero nuevo y subes o bajas de cancha según ganes o pierdas. Si no puedes ir, tú mismo eliges quién te sustituye.',
+  individual: 'Te anotas solo, pero siempre juegas en pareja: la app te asigna compañero en cada ronda y tu compañero anterior pasa a ser tu rival. Suben o bajan de cancha juntos según ganen o pierdan. Si no puedes ir, tú mismo eliges tu sustituto.',
   parejas: 'Juegas toda la noche con la misma pareja y suben o bajan de cancha juntos. Aquí no hay sustitutos: si uno no puede, se cae la pareja completa.',
   retas_abiertas: 'Noche libre y social. No hay categorías, ni puntos, ni cupo: llegas y juegas el tiempo que quieras.',
 };
@@ -39,6 +39,18 @@ export async function renderConvocatorias() {
 
   wrap.appendChild(renderComoFunciona());
 
+  // Al arrancar el club todavía no hay ranking que premiar, así que la ventana
+  // del domingo no aplica a ninguna convocatoria. Es la misma frase en todas:
+  // se dice una vez arriba en lugar de repetirla dentro de cada tarjeta.
+  const sinRanking = filas.some(
+    (f) => f.formato !== 'retas_abiertas' && f.ranking_listo === false);
+  if (sinRanking) {
+    wrap.appendChild(el('div', { class: 'aviso aviso-neutral mb-4' }, [
+      el('strong', {}, 'Todavía no hay ranking suficiente. '),
+      `La ventaja del top ${filas[0] ? filas[0].top_n : 12} para apartar lugar el domingo arranca cuando el club lleve varias noches jugadas. Mientras tanto, todas estas convocatorias son para todos por orden de llegada.`,
+    ]));
+  }
+
   async function refresh() {
     const fresh = await renderConvocatorias();
     wrap.replaceWith(fresh);
@@ -54,7 +66,7 @@ export async function renderConvocatorias() {
   }
 
   for (const f of filas) {
-    wrap.appendChild(renderTarjeta(f, profile, refresh));
+    wrap.appendChild(renderTarjeta(f, profile, refresh, sinRanking));
   }
 
   return wrap;
@@ -110,7 +122,7 @@ function renderComoFunciona() {
 /* ============================================================
    Tarjeta de una convocatoria
    ============================================================ */
-function renderTarjeta(f, profile, refresh) {
+function renderTarjeta(f, profile, refresh, avisoArriba) {
   const card = el('div', { class: 'card' });
   const tengoRegistroActivo = f.mi_status && ACTIVO.includes(f.mi_status);
   const st = f.mi_status ? STATUS_LABEL[f.mi_status] : null;
@@ -134,7 +146,7 @@ function renderTarjeta(f, profile, refresh) {
 
   card.appendChild(renderCupo(f));
 
-  const banner = renderBannerVentana(f);
+  const banner = renderBannerVentana(f, avisoArriba);
   if (banner) card.appendChild(banner);
 
   card.appendChild(renderAcciones(f, profile, refresh));
@@ -158,7 +170,7 @@ function renderCupo(f) {
   return box;
 }
 
-function renderBannerVentana(f) {
+function renderBannerVentana(f, avisoArriba) {
   if (f.ventana_abierta) {
     if (f.tengo_ventaja) {
       return el('div', { class: 'aviso aviso-ok mt-3' }, [
@@ -172,6 +184,16 @@ function renderBannerVentana(f) {
     ]);
   }
   if (f.ventana_cerrada) {
+    // Decir "ya se acabó la preferencia" cuando el ranking todavía no existe
+    // sería mentira: nunca empezó. Ese caso ya se explica una sola vez arriba
+    // de la lista, así que aquí la tarjeta se queda sin banner.
+    if (f.ranking_listo === false) {
+      if (avisoArriba) return null;
+      return el('div', { class: 'aviso aviso-neutral mt-3' }, [
+        el('strong', {}, 'Todavía no hay ranking suficiente. '),
+        `La ventaja del top ${f.top_n} arranca cuando el club lleve varias noches jugadas. Mientras tanto, estas convocatorias son para todos por orden de llegada.`,
+      ]);
+    }
     return el('div', { class: 'aviso aviso-neutral mt-3' },
       'Ya se acabó la preferencia por ranking: esta convocatoria está abierta para todos, por orden de llegada.');
   }
