@@ -1,4 +1,5 @@
 import { el, todayISO, formatFecha, formatHora, toast, humanizeError, openSheet, confirmSheet } from '../utils.js';
+import { icon } from '../icons.js';
 import {
   getMyProfile, esAdminOMaestro,
   getEscalerasAdmin, getRegistrosEscalera, getRondasConPartidos,
@@ -103,8 +104,12 @@ async function pintarDetalle(wrap, escaleraId) {
   const loading = el('div', { class: 'stack', style: 'padding-top:60px;' }, [el('div', { class: 'spinner' })]);
   wrap.appendChild(loading);
 
-  const [escaleras, registros, rondas] = await Promise.all([
+  // El tope de rondas se pide junto con lo demas: si se pidiera despues, la
+  // pantalla pintaria el roster y las rondas llegarian tarde, que es justo el
+  // momento en que recepcion esta esperando ver la ronda nueva.
+  const [escaleras, registros, rondas, tope] = await Promise.all([
     getEscalerasAdmin(), getRegistrosEscalera(escaleraId), getRondasConPartidos(escaleraId),
+    getAjusteNum('max_rondas_escalera', 7),
   ]);
   const esc = escaleras.find((e) => e.id === escaleraId);
   wrap.innerHTML = '';
@@ -141,19 +146,18 @@ async function pintarDetalle(wrap, escaleraId) {
   const completo = confirmados.length >= cupo;
   const yaArranco = ['in_progress', 'completed'].includes(esc.status);
 
-  // ---- Cuántos van ----
-  if (esc.status !== 'cancelled') {
-    wrap.appendChild(renderCuantosVan(esc, confirmados.length, cupo, enEspera.length, yaArranco));
-  }
-
-  // ---- El botón grande de la noche ----
+  // Antes de arrancar, lo importante es el cupo y la lista. Ya en juego, lo
+  // importante es la ronda: el cupo se guarda en una linea y la lista se
+  // pliega, para que la ronda viva quede lo mas arriba posible.
   if (esc.status === 'scheduled') {
+    wrap.appendChild(renderCuantosVan(esc, confirmados.length, cupo, enEspera.length, yaArranco));
     wrap.appendChild(renderComenzar(esc, confirmados.length, cupo, faltan, completo, refresh));
-  }
-
-  // ---- Quién va ----
-  if (esc.status !== 'cancelled') {
     wrap.appendChild(renderRoster(esc, ws, registros, confirmados, enEspera, cupo, refresh));
+  } else if (esc.status !== 'cancelled') {
+    wrap.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' },
+      `${confirmados.length} jugadores en cancha`));
+    wrap.appendChild(plegable(`Quién va (${confirmados.length})`,
+      renderRoster(esc, ws, registros, confirmados, enEspera, cupo, refresh)));
   }
 
   // ---- Rondas (solo cuando la noche ya arrancó) ----
@@ -164,30 +168,35 @@ async function pintarDetalle(wrap, escaleraId) {
     return;
   }
 
-  wrap.appendChild(el('div', { class: 'section-title' }, 'Rondas'));
   if (rondas.length === 0) {
-    wrap.appendChild(el('div', { class: 'card' },
+    wrap.appendChild(el('div', { class: 'card mt-4' },
       el('p', { class: 'text-muted' }, 'Esta noche está marcada como en juego pero no tiene rondas. Avisa a dirección.')));
     return;
   }
 
-  rondas.forEach((ronda) => {
-    const rondaCard = el('div', { class: 'card mt-4' });
-    rondaCard.appendChild(el('div', { class: 'row-between mb-2' }, [
-      el('div', { style: 'font-weight:700;' }, `Ronda ${ronda.round_number}`),
-      el('span', { class: `badge ${ronda.status === 'completed' ? 'badge-success' : 'badge-warning'}` },
-        ronda.status === 'completed' ? 'Completa' : 'En curso'),
-    ]));
-    ronda.partidos.forEach((m, i) => {
-      if (i > 0) rondaCard.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
-      rondaCard.appendChild(renderPartidoRow(m, refresh));
-    });
-    wrap.appendChild(rondaCard);
-  });
-
   const ultimaRonda = rondas[rondas.length - 1];
+  const anteriores = rondas.slice(0, -1);
   const pendientes = ultimaRonda.partidos.filter((m) => m.status === 'pending').length;
-  const tope = await getAjusteNum('max_rondas_escalera', 7);
+
+  /* La ronda que se está jugando va HASTA ARRIBA y sola. Antes se apilaban las
+     7 rondas una debajo de otra: en la ronda 6 había que bajar cuatro pantallas
+     para llegar a la viva, pasando junto a 15 botones de "Corregir resultado"
+     que borran rondas si se tocan por error. */
+  const tituloVivo = el('div', { class: 'row-between', style: 'align-items:baseline;' }, [
+    el('div', { style: 'font-weight:800;font-size:22px;' },
+      esc.status === 'completed' ? `Ronda ${ultimaRonda.round_number} — la última` : `Ronda ${ultimaRonda.round_number} de ${tope}`),
+    el('span', { class: `badge ${pendientes > 0 ? 'badge-warning' : 'badge-success'}` },
+      pendientes > 0 ? `Faltan ${pendientes}` : 'Completa'),
+  ]);
+  wrap.appendChild(el('div', { class: 'mt-4 mb-2' }, tituloVivo));
+
+  const cardViva = el('div', { class: 'card' });
+  ultimaRonda.partidos.forEach((m, i) => {
+    if (i > 0) cardViva.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
+    cardViva.appendChild(renderPartidoRow(m, refresh));
+  });
+  wrap.appendChild(cardViva);
+
   const accionesFinales = el('div', { class: 'stack gap-3 mt-4' });
 
   if (pendientes > 0) {
@@ -201,7 +210,15 @@ async function pintarDetalle(wrap, escaleraId) {
       accionesFinales.appendChild(el('button', { class: 'btn btn-secondary', onclick: async (e) => {
         e.target.disabled = true; e.target.textContent = 'Generando…';
         try { await generarSiguienteRonda(escaleraId); toast(`Ronda ${ultimaRonda.round_number + 1} lista.`, 'success'); refresh(); }
-        catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; e.target.textContent = 'Generar siguiente ronda'; }
+        catch (err) {
+          // Si otro dispositivo ya la genero, no es un error que recepcion
+          // pueda entender: se recarga y ya está la ronda nueva en pantalla.
+          if (/duplicate key|rounds_escalera_id_round_number/i.test(String(err && err.message))) {
+            toast('Esa ronda ya estaba generada — te la muestro.', 'success'); refresh(); return;
+          }
+          toast(humanizeError(err), 'error');
+          e.target.disabled = false; e.target.textContent = 'Generar siguiente ronda';
+        }
       } }, 'Generar siguiente ronda'));
     } else {
       accionesFinales.appendChild(el('div', { class: 'aviso aviso-neutral' },
@@ -210,7 +227,7 @@ async function pintarDetalle(wrap, escaleraId) {
     accionesFinales.appendChild(el('button', { class: 'btn btn-primary', onclick: async (e) => {
       const ok = await confirmSheet({
         title: '¿Cerrar la noche?',
-        body: 'Se reparten los bonos de posición final según la cancha donde terminó cada quien, y la noche entra al ranking. No se puede deshacer desde aquí.',
+        body: `Se reparten los bonos de posición final según la cancha donde terminó cada quien, y la noche entra al ranking. Se cierra con las ${ultimaRonda.round_number} ronda(s) jugadas. No se puede deshacer desde aquí.`,
         confirmLabel: 'Sí, cerrar',
       });
       if (!ok) return;
@@ -220,6 +237,48 @@ async function pintarDetalle(wrap, escaleraId) {
     } }, 'Cerrar la noche'));
   }
   wrap.appendChild(accionesFinales);
+
+  /* Las rondas ya jugadas quedan guardadas pero fuera del camino. */
+  if (anteriores.length) {
+    const cuerpo = el('div');
+    anteriores.slice().reverse().forEach((ronda) => {
+      const rondaCard = el('div', { class: 'card mt-2' });
+      rondaCard.appendChild(el('div', { class: 'row-between mb-2' }, [
+        el('div', { style: 'font-weight:700;' }, `Ronda ${ronda.round_number}`),
+        el('span', { class: 'badge badge-success' }, 'Completa'),
+      ]));
+      ronda.partidos.forEach((m, i) => {
+        if (i > 0) rondaCard.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
+        rondaCard.appendChild(renderPartidoRow(m, refresh));
+      });
+      cuerpo.appendChild(rondaCard);
+    });
+    wrap.appendChild(plegable(`Rondas anteriores (${anteriores.length})`, cuerpo));
+  }
+}
+
+/* Una seccion que se abre y se cierra. Durante una noche hay que tener a la
+   vista SOLO la ronda que se esta jugando: todo lo demas estorba y ademas
+   pone al alcance del dedo botones que borran rondas. */
+function plegable(titulo, contenido) {
+  const caja = el('div', { class: 'mt-4' });
+  const cuerpo = el('div', { style: 'display:none;' }, contenido);
+  const chevron = el('span', { class: 'como-chevron', html: icon.chevronRight,
+    style: 'width:18px;height:18px;color:var(--text-tertiary);transition:transform 150ms ease;' });
+  const cabeza = el('button', {
+    class: 'row-between',
+    style: 'width:100%;background:none;border:none;text-align:left;color:inherit;padding:6px 0;',
+    onclick: () => {
+      const abierto = cuerpo.style.display !== 'none';
+      cuerpo.style.display = abierto ? 'none' : 'block';
+      chevron.style.transform = abierto ? 'none' : 'rotate(90deg)';
+    },
+  }, [
+    el('div', { style: 'font-weight:700;font-size:14px;' }, titulo),
+    chevron,
+  ]);
+  caja.append(cabeza, cuerpo);
+  return caja;
 }
 
 /* ============================================================
@@ -346,11 +405,15 @@ function renderRoster(esc, ws, registros, confirmados, enEspera, cupo, refresh) 
       ]),
       el('span', { class: `badge ${st.cls}` }, st.text),
     ]));
-    if (['confirmed', 'substitute'].includes(r.status) && esc.status !== 'completed') {
+    // Sustituto / no-show / quitar solo tienen sentido ANTES de arrancar. Una
+    // vez que la noche esta en juego, marcar "no vino" le cobraba la
+    // penalizacion al jugador y su lugar seguia sumando puntos en las rondas
+    // siguientes: quedaba castigado y premiado al mismo tiempo.
+    if (['confirmed', 'substitute'].includes(r.status) && esc.status === 'scheduled') {
       card.appendChild(el('div', { class: 'btn-row mt-2' }, [
         el('button', { class: 'btn btn-secondary btn-sm', onclick: () => abrirSustituto(r, refresh, ws.format) }, 'Sustituto'),
         el('button', { class: 'btn btn-secondary btn-sm', onclick: async () => {
-          const ok = await confirmSheet({ title: '¿No se presentó?', body: 'Se le descuenta la penalización de no-show sobre su puntaje de las últimas 6 noches.', confirmLabel: 'Sí, no vino', danger: true });
+          const ok = await confirmSheet({ title: '¿No se presentó?', body: 'Se le descuenta la penalización de no-show sobre su puntaje de las últimas 6 noches y se libera su lugar.', confirmLabel: 'Sí, no vino', danger: true });
           if (!ok) return;
           try { await marcarNoShow(r.id); toast('Marcado como no-show.', 'success'); refresh(); }
           catch (err) { toast(humanizeError(err), 'error'); }
@@ -520,6 +583,25 @@ function abrirCapturaResultado(m, onChange) {
     el('div', { class: 'text-tiny', style: 'padding-bottom:18px;font-weight:700;' }, 'vs'),
     eq2.node,
   ]));
+
+  /* Confirmación en voz alta antes de guardar: el error más fácil de cometer
+     es teclear el marcador al revés, y así se ve de inmediato. */
+  const quienGana = el('div', { class: 'aviso aviso-ok mt-3', style: 'display:none;' });
+  content.appendChild(quienGana);
+  const repintarGanador = () => {
+    const a = Number(eq1.input.value), b = Number(eq2.input.value);
+    if (!eq1.input.value || !eq2.input.value || !Number.isFinite(a) || !Number.isFinite(b) || a === b) {
+      quienGana.style.display = 'none'; return;
+    }
+    quienGana.style.display = 'block';
+    quienGana.innerHTML = '';
+    quienGana.append(
+      el('strong', {}, 'Gana ' + nombreEquipo(m, a > b ? 'team1' : 'team2') + '. '),
+      `Suben a la cancha de arriba; los otros bajan.`);
+  };
+  eq1.input.addEventListener('input', repintarGanador);
+  eq2.input.addEventListener('input', repintarGanador);
+  repintarGanador();
 
   if (m.status === 'completed') {
     const nota = el('input', { class: 'input', type: 'text', placeholder: 'Motivo de la corrección (opcional)' });

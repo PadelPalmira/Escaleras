@@ -91,13 +91,19 @@ async function renderInicioJugador(profile) {
             el('div', { class: 'stat-value' }, categoria.rank != null ? `#${categoria.rank}` : '—'),
             el('div', { class: 'stat-label' }, 'Posición'),
           ]),
+          // El numero grande tiene que ser EL MISMO que el del Ranking: el
+          // promedio por noche. Antes aqui salia la suma y en Ranking el
+          // promedio, y eran dos respuestas distintas a "cuantos puntos tengo".
           el('div', { class: 'stat-tile' }, [
-            el('div', { class: 'stat-value' }, categoria.rolling_points != null ? Number(categoria.rolling_points).toFixed(0) : '—'),
-            el('div', { class: 'stat-label' }, 'Puntos'),
+            el('div', { class: 'stat-value' }, (() => {
+              const n = Number(categoria.escaleras_counted || 0);
+              return n > 0 ? (Number(categoria.rolling_points) / n).toFixed(0) : '—';
+            })()),
+            el('div', { class: 'stat-label' }, 'Prom. x noche'),
           ]),
           el('div', { class: 'stat-tile' }, [
             el('div', { class: 'stat-value' }, categoria.escaleras_counted != null ? categoria.escaleras_counted : '—'),
-            el('div', { class: 'stat-label' }, 'Escaleras' ),
+            el('div', { class: 'stat-label' }, 'Noches' ),
           ]),
         ]),
       ])
