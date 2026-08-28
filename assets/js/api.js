@@ -805,12 +805,38 @@ export async function updateSystemSetting(key, value) {
   if (error) throw error;
 }
 export async function getWeekdayScheduleAll() {
-  const { data, error } = await supabase.from('weekday_schedule').select('*').order('weekday', { ascending: true });
+  const { data, error } = await supabase
+    .from('weekday_schedule')
+    .select('*, escaleras(count)')
+    .order('weekday', { ascending: true });
   if (error) throw error;
-  return data;
+  // escaleras(count) llega como [{ count: N }] — lo aplanamos a un número para
+  // que la pantalla decida ahí mismo si un horario se puede borrar (nunca
+  // generó convocatorias) o solo desactivar (ya tiene historial que conservar).
+  return (data || []).map((ws) => {
+    const { escaleras, ...resto } = ws;
+    return { ...resto, escaleras_generadas: escaleras?.[0]?.count ?? 0 };
+  });
 }
 export async function updateWeekdaySchedule(id, fields) {
   const { error } = await supabase.from('weekday_schedule').update(fields).eq('id', id);
+  if (error) throw error;
+}
+/** Crea un horario semanal nuevo (nueva escalera/categoría recurrente). Solo Maestro (RLS). */
+export async function crearWeekdaySchedule(fields) {
+  const { data, error } = await supabase.from('weekday_schedule').insert(fields).select().single();
+  if (error) throw error;
+  return data;
+}
+/**
+ * Borra un horario semanal por completo. Solo Maestro (RLS), y solo tiene
+ * sentido llamarlo cuando el horario nunca generó ninguna convocatoria —
+ * si ya generó alguna, la base de datos rechaza el borrado (hay historial
+ * de puntos/partidos que depende de ese horario) y hay que desactivarlo
+ * en vez de borrarlo.
+ */
+export async function borrarWeekdaySchedule(id) {
+  const { error } = await supabase.from('weekday_schedule').delete().eq('id', id);
   if (error) throw error;
 }
 /**
@@ -879,7 +905,8 @@ export async function getNotificacionesUrgentes(playerId, limite = 3) {
     .is('read_at', null)
     .in('type', ['promocion_lista_espera', 'escalera_cancelada', 'invitacion_pareja',
                  'confirmacion_requerida', 'sustituto_encontrado', 'cambio_categoria',
-                 'privilegio_perdido', 'pareja_cancelada', 'multa_aplicada', 'suspension'])
+                 'privilegio_perdido', 'pareja_cancelada', 'multa_aplicada', 'suspension',
+                 'suspension_levantada', 'cambio_en_cancha'])
     .order('created_at', { ascending: false })
     .limit(limite);
   if (error) throw error;
