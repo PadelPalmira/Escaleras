@@ -14,3 +14,7 @@ export const CLUB_WHATSAPP_NUMBER = '527778798613';
 export function whatsappHelpUrl(mensaje = 'Hola, tengo una duda sobre Escaleras Palmira 🎾') {
   return `https://wa.me/${CLUB_WHATSAPP_NUMBER}?text=${encodeURIComponent(mensaje)}`;
 }
+
+// URL pública donde los jugadores entran a la app — para armar links que los
+// manden directo ahí (p.ej. desde un WhatsApp de recepción).
+export const APP_URL = 'https://padelpalmira.github.io/Escaleras/';
