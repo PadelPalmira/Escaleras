@@ -1,4 +1,4 @@
-import { el, formatHora, toast, humanizeError, confirmSheet } from '../utils.js';
+import { el, formatHora, toast, humanizeError, confirmSheet, avatarContent, chipJugador } from '../utils.js';
 import {
   getMyProfile, esMaestro,
   getSystemSettingsAll, updateSystemSetting, getWeekdayScheduleAll, updateWeekdaySchedule,
@@ -322,9 +322,12 @@ async function pintarStaff(box) {
   staff.forEach((p, i) => {
     if (i > 0) list.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
     const row = el('div', { class: 'row-between' }, [
-      el('div', {}, [
-        el('div', { style: 'font-weight:600;font-size:14px;' }, p.full_name || '(sin nombre)'),
-        el('div', { class: 'text-tiny' }, p.email),
+      el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
+        el('span', { class: 'avatar-mini' }, avatarContent(p)),
+        el('div', {}, [
+          el('div', { style: 'font-weight:600;font-size:14px;' }, p.full_name || '(sin nombre)'),
+          el('div', { class: 'text-tiny' }, p.email),
+        ]),
       ]),
       el('span', { class: `badge ${p.role === 'maestro' ? 'badge-a' : 'badge-neutral'}` }, p.role === 'maestro' ? 'Maestro' : 'Admin'),
     ]);
@@ -356,13 +359,10 @@ async function pintarStaff(box) {
           if (!search.value.trim()) return;
           const jugadores = (await buscarJugadores(search.value, 10)).filter((j) => j.role === 'jugador');
           jugadores.forEach((j) => {
-            results.appendChild(el('button', {
-              class: 'chip-btn',
-              onclick: async () => {
-                try { await setProfileRole(j.id, 'admin'); toast(`${j.full_name} ahora es Admin.`, 'success'); search.value = ''; results.innerHTML = ''; pintarStaff(box); }
-                catch (err) { toast(humanizeError(err), 'error'); }
-              },
-            }, j.full_name || '(sin nombre)'));
+            results.appendChild(chipJugador(j, async () => {
+              try { await setProfileRole(j.id, 'admin'); toast(`${j.full_name} ahora es Admin.`, 'success'); search.value = ''; results.innerHTML = ''; pintarStaff(box); }
+              catch (err) { toast(humanizeError(err), 'error'); }
+            }));
           });
           if (jugadores.length === 0) results.appendChild(el('p', { class: 'text-muted' }, 'Sin resultados.'));
         }, 200);

@@ -1,4 +1,4 @@
-import { el, formatFecha, formatHora, formatFechaHora, toast, humanizeError, openSheet, confirmSheet } from '../utils.js';
+import { el, formatFecha, formatHora, formatFechaHora, toast, humanizeError, openSheet, confirmSheet, chipJugador } from '../utils.js';
 import { icon } from '../icons.js';
 import {
   getMyProfile, getMisConvocatorias,
@@ -375,18 +375,15 @@ async function abrirSelectorPareja(f, profile, aListaEspera, refresh) {
     list.innerHTML = '';
     const q = filtro.trim().toLowerCase();
     jugadores.filter((j) => !q || (j.full_name || '').toLowerCase().includes(q)).slice(0, 30).forEach((j) => {
-      list.appendChild(el('button', {
-        class: 'chip-btn',
-        onclick: async (e) => {
-          e.target.disabled = true;
-          try {
-            const res = await registrarJugador(f.escalera_id, profile.id, j.id, aListaEspera);
-            toast(res.mensaje || 'Listo.', res.resultado === 'confirmed' ? 'success' : 'info', 5200);
-            handle.close();
-            refresh();
-          } catch (err) { toast(humanizeError(err), 'error', 6000); e.target.disabled = false; }
-        },
-      }, j.full_name || '(sin nombre)'));
+      list.appendChild(chipJugador(j, async (e) => {
+        e.target.closest('button').disabled = true;
+        try {
+          const res = await registrarJugador(f.escalera_id, profile.id, j.id, aListaEspera);
+          toast(res.mensaje || 'Listo.', res.resultado === 'confirmed' ? 'success' : 'info', 5200);
+          handle.close();
+          refresh();
+        } catch (err) { toast(humanizeError(err), 'error', 6000); e.target.closest('button').disabled = false; }
+      }));
     });
     if (!list.children.length) list.appendChild(el('p', { class: 'text-muted' }, 'Sin resultados.'));
   }
@@ -428,18 +425,15 @@ async function abrirSelectorSustituto(f, profile, refresh) {
     list.innerHTML = '';
     const q = filtro.trim().toLowerCase();
     jugadores.filter((j) => !q || (j.full_name || '').toLowerCase().includes(q)).slice(0, 30).forEach((j) => {
-      list.appendChild(el('button', {
-        class: 'chip-btn',
-        onclick: async (e) => {
-          e.target.disabled = true;
-          try {
-            await asignarSustituto(f.mi_registro_id, j.id, esCoach);
-            toast(`${j.full_name} jugará en tu lugar.`, 'success');
-            handle.close();
-            refresh();
-          } catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
-        },
-      }, j.full_name || '(sin nombre)'));
+      list.appendChild(chipJugador(j, async (e) => {
+        e.target.closest('button').disabled = true;
+        try {
+          await asignarSustituto(f.mi_registro_id, j.id, esCoach);
+          toast(`${j.full_name} jugará en tu lugar.`, 'success');
+          handle.close();
+          refresh();
+        } catch (err) { toast(humanizeError(err), 'error'); e.target.closest('button').disabled = false; }
+      }));
     });
     if (!list.children.length) list.appendChild(el('p', { class: 'text-muted' }, 'Sin resultados.'));
   }
