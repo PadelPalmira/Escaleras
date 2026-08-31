@@ -212,6 +212,40 @@ export async function responderInvitacionPareja(registrationId, aceptar) {
 }
 
 /**
+ * Invitas a alguien que TODAVÍA no tiene cuenta en el club. Si el correo ya
+ * pertenece a un jugador registrado, el servidor lo detecta solo y lo trata
+ * como una invitación normal (como si lo hubieras encontrado buscándolo).
+ * Igual que cualquier invitación de pareja, queda con 1 hora para
+ * confirmarse — aquí esa hora empieza a correr desde que tu invitado se
+ * registre con este mismo correo, no desde que mandas el correo.
+ */
+export async function invitarParejaPorCorreo(escaleraId, playerId, email, nombreSugerido) {
+  const { data, error } = await supabase.rpc('invitar_pareja_por_correo', {
+    p_escalera_id: escaleraId,
+    p_player_id: playerId,
+    p_email: email,
+    p_nombre_sugerido: nombreSugerido || null,
+  });
+  if (error) throw error;
+  return data && data[0] ? data[0] : data;
+}
+
+/** Cancela una invitación de pareja que TODAVÍA no ha sido aceptada ni
+ * rechazada — sin penalización, porque nada se había confirmado. Si tu
+ * pareja ya contestó, esto ya no aplica: usa "Darme de baja". */
+export async function cancelarInvitacionPareja(registrationId) {
+  const { error } = await supabase.rpc('cancelar_invitacion_pareja', { p_registration_id: registrationId });
+  if (error) throw error;
+}
+
+/** Cancela una invitación por correo que todavía no ha sido reclamada
+ * (tu invitado no se ha registrado). Libera tu lugar en la fila. */
+export async function cancelarInvitacionCorreo(inviteId) {
+  const { error } = await supabase.rpc('cancelar_invitacion_correo', { p_invite_id: inviteId });
+  if (error) throw error;
+}
+
+/**
  * Devuelve { estado, penalizado, puntos_penalizacion, perdio_ventaja,
  * cubierto, mensaje }. El mensaje ya viene redactado desde la base de datos
  * para que app y reglamento nunca digan cosas distintas.
@@ -936,7 +970,7 @@ export async function getNotificacionesUrgentes(playerId, limite = 3) {
     .is('read_at', null)
     .in('type', ['promocion_lista_espera', 'escalera_cancelada', 'invitacion_pareja',
                  'confirmacion_requerida', 'sustituto_encontrado', 'cambio_categoria',
-                 'privilegio_perdido', 'pareja_cancelada', 'multa_aplicada', 'suspension',
+                 'privilegio_perdido', 'pareja_cancelada', 'pareja_vencida', 'multa_aplicada', 'suspension',
                  'suspension_levantada', 'cambio_en_cancha'])
     .order('created_at', { ascending: false })
     .limit(limite);

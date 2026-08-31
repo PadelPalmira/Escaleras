@@ -82,6 +82,33 @@ export function waLinkConfirmarInvitacion(jugador, sessionDateStr, startTimeStr)
   return `https://wa.me/52${digitos}?text=${encodeURIComponent(mensaje)}`;
 }
 
+/**
+ * Link de "mailto:" para que un JUGADOR invite a su pareja por correo
+ * cuando no la encuentra registrada en el club — el mismo mecanismo que el
+ * botón de WhatsApp de arriba, pero para correo: abre el programa de correo
+ * de quien invita, con el mensaje ya escrito, para que le dé "Enviar" él
+ * mismo. No manda nada la app sola.
+ */
+export function mailtoLinkInvitarPareja(email, nombreSugerido, sessionDateStr, startTimeStr) {
+  const saludo = nombreSugerido ? `Hola ${nombreSugerido},` : 'Hola,';
+  const asunto = 'Te invité a jugar Parejas Fijas en Padel Palmira';
+  const cuerpo = `${saludo}\n\n`
+    + `Te elegí como mi pareja para jugar Parejas Fijas el ${formatFecha(sessionDateStr)} a las ${formatHora(startTimeStr)} `
+    + `en Padel Palmira.\n\n`
+    + `Para confirmar tu lugar, regístrate en la app con ESTE MISMO correo dentro de la próxima hora — si te registras `
+    + `con otro correo no te va a reconocer:\n${APP_URL}\n\n`
+    + `¡Nos vemos en la cancha!`;
+  return `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+}
+
+/** Minutos que faltan para que se cumpla una fecha/hora límite ("expira").
+ * Nunca negativo — 0 significa "ya se venció". */
+export function minutosRestantes(expiraEnIso) {
+  if (!expiraEnIso) return null;
+  const ms = new Date(expiraEnIso).getTime() - ahora().getTime();
+  return Math.max(0, Math.round(ms / 60000));
+}
+
 /* ---------------- Fecha / hora (CDMX) ---------------- */
 
 const fmtDate = new Intl.DateTimeFormat('es-MX', { timeZone: CLUB_TZ, weekday: 'long', day: 'numeric', month: 'long' });
@@ -162,7 +189,7 @@ export function toast(message, type = 'info', ms = 3200) {
     toastWrap = el('div', { class: 'toast-wrap' });
     document.body.appendChild(toastWrap);
   }
-  const icon = type === 'success' ? '✅' : type === 'error' ? '⚠️' : '💬';
+  const icon = type === 'success' ? '✅' : type === 'error' ? '⚠️' : type === 'warning' ? '⏳' : '💬';
   const node = el('div', { class: `toast ${type}` }, [el('span', {}, icon), el('span', {}, message)]);
   toastWrap.appendChild(node);
   setTimeout(() => {

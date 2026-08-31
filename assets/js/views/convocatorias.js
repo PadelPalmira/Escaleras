@@ -1,9 +1,13 @@
-import { el, formatFecha, formatHora, formatFechaHora, toast, humanizeError, openSheet, confirmSheet, chipJugador } from '../utils.js';
+import {
+  el, formatFecha, formatHora, formatFechaHora, toast, humanizeError, openSheet, confirmSheet, chipJugador,
+  mailtoLinkInvitarPareja, minutosRestantes,
+} from '../utils.js';
 import { icon } from '../icons.js';
 import {
   getMyProfile, getMisConvocatorias,
   registrarJugador, cancelarRegistro, previewCancelacion, asignarSustituto,
   responderInvitacionPareja, getJugadoresParaPareja,
+  invitarParejaPorCorreo, cancelarInvitacionPareja, cancelarInvitacionCorreo,
   registrarseRetasAbiertas, salirRetasAbiertas, getInscritosRetas,
 } from '../api.js';
 
@@ -28,6 +32,18 @@ const STATUS_LABEL = {
 };
 
 const ACTIVO = ['confirmed', 'substitute', 'waitlist'];
+
+/* Toda invitación de pareja (a alguien registrado o por correo) tiene
+ * exactamente 1 hora para confirmarse — si se cumple, se libera sola. Este
+ * texto es el mismo aviso en los dos lados: para quien invita y para quien
+ * fue invitado. */
+function textoTiempoRestante(expiraEnIso) {
+  const min = minutosRestantes(expiraEnIso);
+  if (min === null) return '';
+  if (min <= 0) return 'Se está por vencer.';
+  if (min < 60) return `Quedan ${min} minuto${min === 1 ? '' : 's'} para confirmar.`;
+  return 'Tienen 1 hora para confirmar.';
+}
 
 export async function renderConvocatorias() {
   const [profile, filas] = await Promise.all([getMyProfile(), getMisConvocatorias(9)]);
@@ -231,6 +247,9 @@ function renderAcciones(f, profile, refresh) {
     if (f.mi_partner_status === 'pending' && f.formato === 'parejas') {
       acciones.appendChild(renderInvitacionPendiente(f, refresh));
     }
+    if (f.mi_espera_nombre && f.formato === 'parejas') {
+      acciones.appendChild(renderEsperandoPareja(f, refresh));
+    }
     if (enEspera) {
       acciones.appendChild(el('div', { class: 'aviso aviso-warn' }, [
         el('strong', {}, `Vas en el lugar ${f.mi_lugar_en_espera || '—'} de la lista. `),
@@ -307,6 +326,7 @@ function renderInvitacionPendiente(f, refresh) {
       el('strong', {}, (f.mi_partner_nombre || 'Un jugador') + ' te invitó a jugar en pareja. '),
       'Si aceptas, juegan juntos toda la noche.',
     ]),
+    el('p', { class: 'text-tiny', style: 'color:var(--warning);' }, textoTiempoRestante(f.mi_partner_expira_en)),
     el('div', { class: 'btn-row mt-3' }, [
       el('button', {
         class: 'btn btn-secondary btn-sm',
@@ -324,6 +344,41 @@ function renderInvitacionPendiente(f, refresh) {
           catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
         },
       }, 'Aceptar'),
+    ]),
+  ]);
+}
+
+/* Lo que ve QUIEN INVITÓ mientras espera: a alguien ya registrado que
+ * todavía no acepta, o a alguien invitado por correo que todavía no se ha
+ * registrado. En los dos casos se puede cancelar sin penalización — como
+ * nadie ha confirmado nada todavía, no hay "baja" que penalizar, solo un
+ * intento que se puede corregir. */
+function renderEsperandoPareja(f, refresh) {
+  const esCorreo = !!f.mi_espera_correo_invite_id;
+  return el('div', { class: 'card', style: 'background:var(--surface-2);' }, [
+    el('p', {}, esCorreo
+      ? `Invitaste a ${f.mi_espera_nombre} por correo. En cuanto se registre con ese mismo correo, se aparta el lugar de los dos.`
+      : `Invitaste a ${f.mi_espera_nombre} — todavía no acepta en la app.`),
+    el('p', { class: 'text-tiny', style: 'color:var(--warning);' }, textoTiempoRestante(f.mi_espera_expira_en)),
+    el('div', { class: 'btn-row mt-3' }, [
+      el('button', {
+        class: 'btn btn-danger btn-sm',
+        onclick: async (e) => {
+          const ok = await confirmSheet({
+            title: '¿Cancelar la invitación?',
+            body: '¿Te equivocaste de persona o quieres invitar a alguien más? Se cancela sin ninguna penalización — nadie ha confirmado nada todavía.',
+            confirmLabel: 'Sí, cancelar invitación', danger: true,
+          });
+          if (!ok) return;
+          e.target.disabled = true;
+          try {
+            if (esCorreo) await cancelarInvitacionCorreo(f.mi_espera_correo_invite_id);
+            else await cancelarInvitacionPareja(f.mi_registro_id);
+            toast('Invitación cancelada. Puedes invitar a alguien más.', 'success');
+            refresh();
+          } catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
+        },
+      }, 'Cancelar invitación'),
     ]),
   ]);
 }
@@ -390,6 +445,44 @@ async function abrirSelectorPareja(f, profile, aListaEspera, refresh) {
   draw();
   search.addEventListener('input', () => draw(search.value));
   content.append(search, list);
+
+  // Si tu pareja no tiene cuenta en el club todavía, la invitas por correo —
+  // igual que con el buscador, queda con 1 hora para confirmarse en cuanto
+  // se registre (empieza a correr desde que se registra, no desde ahora).
+  const toggleCorreo = el('button', { class: 'btn btn-ghost btn-sm mt-3', style: 'width:auto;' }, '¿No la encuentras? Invítala por correo');
+  const formCorreo = el('div', { class: 'stack gap-2 mt-2', style: 'display:none;' });
+  const nombreInput = el('input', { class: 'input', type: 'text', placeholder: 'Su nombre (opcional)' });
+  const emailInput = el('input', { class: 'input', type: 'email', placeholder: 'Su correo' });
+  const btnInvitarCorreo = el('button', { class: 'btn btn-primary btn-sm' }, 'Invitar por correo');
+  formCorreo.append(
+    el('p', { class: 'text-tiny' }, 'Le vamos a abrir tu correo con un mensaje ya escrito — tú se lo mandas. En cuanto se registre en la app con ese mismo correo, tiene 1 hora para confirmar.'),
+    nombreInput, emailInput, btnInvitarCorreo,
+  );
+  toggleCorreo.addEventListener('click', () => {
+    const visible = formCorreo.style.display !== 'none';
+    formCorreo.style.display = visible ? 'none' : 'block';
+    toggleCorreo.textContent = visible ? '¿No la encuentras? Invítala por correo' : 'Ocultar';
+  });
+  btnInvitarCorreo.addEventListener('click', async () => {
+    const email = emailInput.value.trim();
+    if (!email || !email.includes('@')) { toast('Escribe un correo válido.', 'error'); return; }
+    btnInvitarCorreo.disabled = true;
+    try {
+      const res = await invitarParejaPorCorreo(f.escalera_id, profile.id, email, nombreInput.value.trim());
+      // Si ese correo ya tenía cuenta en el club, el servidor lo trató como
+      // una invitación normal (ya tiene su lugar apartado) — no hace falta
+      // abrirle el correo a nadie.
+      if (res.resultado === 'pendiente_correo') {
+        window.location.href = mailtoLinkInvitarPareja(email, nombreInput.value.trim(), f.session_date, f.start_time);
+      }
+      toast(res.mensaje || 'Listo.', 'warning', 7000);
+      handle.close();
+      refresh();
+    } catch (err) { toast(humanizeError(err), 'error', 6000); btnInvitarCorreo.disabled = false; }
+  });
+  content.appendChild(toggleCorreo);
+  content.appendChild(formCorreo);
+
   const handle = openSheet(content);
 }
 
