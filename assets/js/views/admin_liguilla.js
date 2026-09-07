@@ -8,7 +8,7 @@ import {
   getParejasLiguilla, getPartidosLiguilla, getPickActualDraft,
 } from '../api.js';
 
-const TIER_LABEL = { liguilla_a: 'Liguilla · Categoría A', ascenso_b: 'Torneo de Ascenso · Categoría B' };
+const TIER_LABEL = { liguilla_a: 'Liguilla · Categoría A', ascenso_b: 'Liguilla Categoría B' };
 const EVENT_STATUS_LABEL = {
   scheduled: { text: 'Programado', cls: 'badge-neutral' },
   qualifying: { text: 'Confirmando calificados', cls: 'badge-warning' },
@@ -41,7 +41,7 @@ export async function renderAdminLiguilla() {
 async function pintarLista(wrap) {
   wrap.innerHTML = '';
   wrap.appendChild(el('div', { class: 'row-between mb-2' }, [
-    el('div', { class: 'h1' }, 'Liguilla / Ascenso'),
+    el('div', { class: 'h1' }, 'Liguilla'),
     el('button', { class: 'btn btn-secondary btn-sm', style: 'width:auto;', onclick: () => abrirCrearEvento(wrap) }, '+ Nuevo'),
   ]));
   wrap.appendChild(el('p', { class: 'text-muted mb-4' }, 'Elige una edición para gestionarla.'));
@@ -67,13 +67,13 @@ async function pintarLista(wrap) {
 
 function abrirCrearEvento(wrap) {
   const content = el('div');
-  content.appendChild(el('div', { class: 'sheet-title' }, 'Nueva edición de Liguilla/Ascenso'));
+  content.appendChild(el('div', { class: 'sheet-title' }, 'Nueva edición de Liguilla'));
   const hoy = ahora();
   const monthDefault = `${hoy.getUTCFullYear()}-${String(hoy.getUTCMonth() + 1).padStart(2, '0')}`;
   const monthInput = el('input', { class: 'input', type: 'text', value: monthDefault, placeholder: 'AAAA-MM' });
   const tierSelect = el('select', { class: 'input' }, [
     el('option', { value: 'liguilla_a' }, 'Liguilla · Categoría A'),
-    el('option', { value: 'ascenso_b' }, 'Torneo de Ascenso · Categoría B'),
+    el('option', { value: 'ascenso_b' }, 'Liguilla Categoría B'),
   ]);
   const dateInput = el('input', { class: 'input', type: 'date' });
   content.appendChild(el('div', { class: 'field' }, [el('label', {}, 'Mes (AAAA-MM)'), monthInput]));

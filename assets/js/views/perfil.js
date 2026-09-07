@@ -5,8 +5,10 @@ import { comprimirFotoPerfil } from '../avatar.js';
 import {
   getMyProfile, updateMyProfile, getMiHistorialPuntos, signOut,
   getMisMultas, getMisSuspensiones, getMisNotificaciones, marcarNotificacionLeida,
-  getMiCategoria, getAjusteNum, subirFotoPerfil, borrarFotoPerfil,
+  getMiSituacionCategorias, getMiInteresFemenil, alternarInteresFemenil, getAjusteNum,
+  subirFotoPerfil, borrarFotoPerfil,
 } from '../api.js';
+import { esFemenil } from '../niveles.js';
 
 const FINE_STATUS = { pending: { text: 'Pendiente', cls: 'badge-warning' }, paid: { text: 'Pagada', cls: 'badge-success' }, waived: { text: 'Condonada', cls: 'badge-neutral' } };
 const NOTIF_URGENT = new Set([
@@ -101,18 +103,55 @@ function renderTarjetaFoto(profile) {
   return card;
 }
 
+/* Solo para niveles femeniles: todavía no hay escaleras femeniles activas,
+   así que aquí se anota el interés en Femenil A y/o Femenil B — en cuanto
+   una llegue al umbral, se abre y se avisa por notificación a toda la lista. */
+async function renderTarjetaFemenil(profile) {
+  const card = el('div', { class: 'card mt-3' });
+  async function pintar() {
+    card.innerHTML = '';
+    const interes = await getMiInteresFemenil(profile.id);
+    card.appendChild(el('div', { style: 'font-weight:700;font-size:14px;' }, 'Escaleras femeniles — próximamente'));
+    card.appendChild(el('p', { class: 'text-tiny mt-1' }, 'Todavía no tenemos suficientes jugadoras anotadas para abrirlas. Anótate en la(s) que te interese(n) y te avisamos en cuanto se abra.'));
+    ['A', 'B'].forEach((cat) => {
+      const d = interes[cat];
+      const fila = el('div', { class: 'row-between mt-3' }, [
+        el('div', {}, [
+          el('div', { style: 'font-weight:600;' }, `Femenil ${cat}`),
+          el('div', { class: 'text-tiny' }, d.abierta ? '¡Ya está abierta!' : `${d.conteo} de ${d.umbral} anotadas`),
+        ]),
+        d.abierta
+          ? el('span', { class: 'badge badge-success' }, 'Abierta')
+          : el('button', {
+              class: `btn btn-sm ${d.interesada ? 'btn-secondary' : 'btn-primary'}`, style: 'width:auto;',
+              onclick: async (e) => {
+                e.target.disabled = true;
+                try { await alternarInteresFemenil(profile.id, cat); await pintar(); }
+                catch (err) { e.target.disabled = false; }
+              },
+            }, d.interesada ? 'Ya no me interesa' : 'Anotarme'),
+      ]);
+      card.appendChild(fila);
+    });
+  }
+  await pintar();
+  return card;
+}
+
 export async function renderPerfil() {
   const profile = await getMyProfile();
   if (!profile) return el('div', { class: 'empty-state' }, 'No se pudo cargar tu perfil.');
-  const [historial, notificaciones, multas, suspensiones, categoria, minNoches, semanas] = await Promise.all([
+  const [historial, notificaciones, multas, suspensiones, situacion, minNoches, semanas] = await Promise.all([
     getMiHistorialPuntos(profile.id, 20),
     getMisNotificaciones(profile.id, 20),
     getMisMultas(profile.id),
     getMisSuspensiones(profile.id),
-    getMiCategoria(profile.id),
+    getMiSituacionCategorias(profile.id),
     getAjusteNum('min_noches_para_mover', 3),
     getAjusteNum('semanas_vigencia_puntos', 8),
   ]);
+  const porCategoria = situacion ? situacion.porCategoria : {};
+  const categoriasConDatos = ['A', 'B'].filter((c) => porCategoria[c]);
 
   const wrap = el('div');
 
@@ -224,33 +263,47 @@ export async function renderPerfil() {
   /* El puente entre esta lista y el numero del Ranking. Sin esto un jugador
      suma sus lineas a mano, le da 553 y en Ranking ve 92: parece un error de
      la app y no lo es. */
+  if (esFemenil(profile.declared_level)) {
+    wrap.appendChild(await renderTarjetaFemenil(profile));
+  }
+
   wrap.appendChild(el('div', { class: 'section-title' }, 'Tu puntaje móvil'));
-  if (categoria) {
-    const noches = Number(categoria.escaleras_counted || 0);
-    const total = Number(categoria.rolling_points || 0);
-    const prom = noches > 0 ? total / noches : 0;
-    const provisional = noches < minNoches;
-    wrap.appendChild(el('div', { class: 'card' }, [
-      el('div', { class: 'row-between' }, [
-        el('div', {}, [
-          el('div', { style: 'font-size:30px;font-weight:800;line-height:1;' }, noches > 0 ? prom.toFixed(0) : '—'),
-          el('div', { class: 'text-tiny mt-1' }, 'puntos por noche'),
+  if (categoriasConDatos.length === 0) {
+    wrap.appendChild(el('div', { class: 'card' }, el('p', { class: 'text-muted' }, 'Todavía no tienes noches jugadas dentro de la ventana, en ninguna categoría.')));
+  } else {
+    categoriasConDatos.forEach((cat) => {
+      const categoria = porCategoria[cat];
+      const noches = Number(categoria.escaleras_counted || 0);
+      const total = Number(categoria.rolling_points || 0);
+      const prom = noches > 0 ? total / noches : 0;
+      const provisional = noches < minNoches;
+      wrap.appendChild(el('div', { class: 'card mt-2' }, [
+        el('div', { class: 'row-between' }, [
+          el('div', {}, [
+            el('div', { class: 'row gap-2', style: 'align-items:baseline;' }, [
+              el('span', { style: 'font-size:30px;font-weight:800;line-height:1;' }, noches > 0 ? prom.toFixed(0) : '—'),
+              el('span', { class: `badge ${cat === 'A' ? 'badge-a' : 'badge-b'}`, style: 'font-size:10px;padding:2px 8px;' }, `Cat ${cat}`),
+            ]),
+            el('div', { class: 'text-tiny mt-1' }, 'puntos por noche'),
+          ]),
+          provisional
+            ? el('span', { class: 'badge badge-warning' }, 'Provisional')
+            : el('span', { class: 'badge badge-neutral' }, `${noches} noches`),
         ]),
+        el('p', { class: 'text-tiny mt-3' },
+          noches > 0
+            ? `Es el promedio de tus últimas ${noches} escaleras en Categoría ${cat} (${total.toFixed(0)} pts en total). Ese promedio es el que te ordena en el Ranking de esa categoría, no la suma.`
+            : 'Todavía no tienes noches jugadas dentro de la ventana.'),
         provisional
-          ? el('span', { class: 'badge badge-warning' }, 'Provisional')
-          : el('span', { class: 'badge badge-neutral' }, `${noches} noches`),
-      ]),
-      el('p', { class: 'text-tiny mt-3' },
-        noches > 0
-          ? `Es el promedio de tus últimas ${noches} escaleras (${total.toFixed(0)} pts en total). Ese promedio es el que te ordena en el Ranking, no la suma.`
-          : 'Todavía no tienes noches jugadas dentro de la ventana.'),
-      provisional
-        ? el('p', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' },
-            `Con menos de ${minNoches} noches tu puntaje es provisional: no subes ni bajas de categoría hasta completarlas.`)
-        : null,
-      el('p', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' },
-        `Una noche jugada cuenta durante ${semanas} semanas; después sale de tu ventana.`),
-    ]));
+          ? el('p', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' },
+              `Con menos de ${minNoches} noches tu puntaje en Categoría ${cat} es provisional: tu lugar todavía puede moverse mucho.`)
+          : null,
+        el('p', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' },
+          `Una noche jugada cuenta durante ${semanas} semanas; después sale de tu ventana.`),
+      ]));
+    });
+    wrap.appendChild(el('p', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' },
+      'A y B llevan puntos independientes: puedes anotarte a la que quieras cada semana, no hay ascenso ni descenso automático.'));
   }
 
   // Historial de puntos

@@ -917,26 +917,16 @@ function abrirAgregarJugador(esc, ws, refresh) {
     resumen.textContent = `Pareja: ${seleccion.a ? seleccion.a.full_name : '—'} + ${seleccion.b ? seleccion.b.full_name : '—'}`;
   };
 
-  const guardar = async (a, b, forzar = false) => {
+  // Ya no hay categoría asignada por jugador, así que ya no existe el aviso
+  // de "es de otra categoría" — cualquier jugador se puede agregar a
+  // cualquier convocatoria libremente, igual que al registrarse solo.
+  const guardar = async (a, b) => {
     try {
-      const r = await adminAgregarJugador(esc.id, a.id, b ? b.id : null, forzar);
+      const r = await adminAgregarJugador(esc.id, a.id, b ? b.id : null);
       toast(r && r.mensaje ? r.mensaje : 'Listo, ya está en la lista.', 'success');
       handle.close();
       refresh();
     } catch (err) {
-      // La base avisa cuando el jugador es de otra categoría en vez de
-      // dejarlo pasar en silencio: recepción decide, pero a propósito.
-      const msg = String((err && err.message) || '');
-      if (msg.includes('CATEGORIA_DISTINTA')) {
-        const detalle = msg.split('CATEGORIA_DISTINTA:').pop().trim();
-        const ok = await confirmSheet({
-          title: 'Es de otra categoría',
-          body: `${detalle} Si lo metes de todas formas va a jugar por puntos contra jugadores de otro nivel. ¿Seguro?`,
-          confirmLabel: 'Sí, meterlo igual', danger: true,
-        });
-        if (ok) await guardar(a, b, true);
-        return;
-      }
       toast(humanizeError(err), 'error');
     }
   };

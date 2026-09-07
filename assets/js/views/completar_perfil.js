@@ -55,10 +55,23 @@ export function renderCompletarPerfil(profile, onDone) {
     recomendacionBox.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:0.04em;' }, 'Te recomendamos'));
     if (rec.modo === 'retas') {
       recomendacionBox.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, 'Empieza en Retas Abiertas — 100% social, sin presión de puntos, perfecto para agarrar ritmo. En cuanto quieras, también puedes anotarte directo a Categoría B si prefieres competir desde ya.'));
+    } else if (rec.modo === 'opciones') {
+      recomendacionBox.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, 'Categoría A o Categoría B — las dos son válidas para tu nivel. Tú eliges cada semana en cuál anotarte, según cómo te sientas ese día.'));
+    } else if (rec.modo === 'femenil') {
+      recomendacionBox.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, 'Todavía no tenemos escaleras femeniles activas. Mientras se abren, puedes jugar en Retas Abiertas — y en tu perfil puedes anotarte a la lista de interesadas de Femenil A y/o Femenil B para que te avisemos en cuanto abran.'));
     } else {
-      recomendacionBox.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, `Categoría ${rec.categoria} — es donde arrancas mientras el sistema calcula tu categoría real con tus primeros resultados.`));
+      recomendacionBox.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, `Categoría ${rec.categoria} — es donde te recomendamos empezar mientras juegas tus primeras escaleras y el sistema calcula tu lugar real ahí.`));
     }
-    if (rec.dias.length) {
+    if (rec.modo === 'opciones' && rec.diasPorCategoria) {
+      ['A', 'B'].forEach((cat) => {
+        const dias = rec.diasPorCategoria[cat] || [];
+        if (!dias.length) return;
+        const lista = el('div', { class: 'stack gap-1 mt-3' });
+        lista.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:700;' }, `Categoría ${cat}:`));
+        dias.forEach((ws) => lista.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:600;' }, `📅 ${textoDia(ws)}`)));
+        recomendacionBox.appendChild(lista);
+      });
+    } else if (rec.dias.length) {
       const lista = el('div', { class: 'stack gap-1 mt-3' });
       rec.dias.forEach((ws) => lista.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:600;' }, `📅 ${textoDia(ws)}`)));
       recomendacionBox.appendChild(lista);

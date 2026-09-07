@@ -9,7 +9,6 @@ const SECTION_ICON = {
   formato_de_juego: icon.clock,
   puntos: icon.coin,
   categorias: icon.ranking,
-  zona_limite: icon.swap,
   convocatorias: icon.calendar,
   sustitutos: icon.shield,
   liguilla: icon.trophy,

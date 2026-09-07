@@ -108,11 +108,11 @@ function renderComoFunciona() {
   const body = el('div', { class: 'mt-3', style: 'display:none;' }, [
     el('p', { class: 'text-tiny' }, [
       el('strong', {}, 'Cada noche parte sus lugares en dos. '),
-      'Una parte se aparta para los mejores del ranking de tu categoría y la otra se guarda para todos los demás. Así siempre hay puerta de entrada, aunque no vayas arriba.',
+      'Una parte se aparta para los mejores del ranking en vivo de esa categoría y la otra se guarda para todos los demás. Así siempre hay puerta de entrada, aunque no vayas arriba.',
     ]),
     el('p', { class: 'text-tiny mt-2' }, [
       el('strong', {}, 'Domingo 10:00 am – 6:00 pm: '),
-      'los del top apartan solo sus lugares reservados. Los otros son por orden de llegada para el resto de la categoría, desde las 10:00 am.',
+      'los del top apartan solo sus lugares reservados. Los demás lugares (y la lista de espera) se reparten con una mezcla: 60% tu lugar por puntos en esa categoría, 40% qué tan rápido te anotaste. Si no tienes historial ahí todavía, no te manda al final — te da un lugar neutral. La app siempre te explica tu lugar con números.',
     ]),
     el('p', { class: 'text-tiny mt-2' }, [
       el('strong', {}, 'Domingo 6:00 pm en adelante: '),
@@ -149,8 +149,12 @@ function renderTarjeta(f, profile, refresh, avisoArriba) {
       el('div', { class: 'text-tiny mt-1' },
         `${FORMAT_LABEL[f.formato]}${f.categoria ? ' · Cat ' + f.categoria : ''} · ${formatHora(f.start_time)}–${formatHora(f.end_time)}`),
     ]),
-    st && (tengoRegistroActivo || f.mi_sustituto_nombre)
-      ? el('span', { class: `badge ${st.cls}` }, st.text) : null,
+    el('div', { class: 'stack gap-1', style: 'align-items:flex-end;' }, [
+      st && (tengoRegistroActivo || f.mi_sustituto_nombre)
+        ? el('span', { class: `badge ${st.cls}` }, st.text) : null,
+      f.es_categoria_recomendada && !tengoRegistroActivo
+        ? el('span', { class: 'badge badge-neutral', style: 'font-size:10px;' }, 'Recomendada para tu nivel') : null,
+    ]),
   ]));
 
   card.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' }, FORMAT_HINT[f.formato]));
@@ -201,7 +205,7 @@ function renderBannerVentana(f, avisoArriba) {
     }
     return el('div', { class: 'aviso aviso-info mt-3' }, [
       el('strong', {}, `Quedan ${Math.max(abiertos - usadosAbiertos, 0)} de ${abiertos} lugares abiertos. `),
-      `Los otros ${reservados} están apartados para el top ${f.top_n} hasta las 6:00 pm del domingo (${formatFechaHora(f.ventana_cierra)}). Los abiertos son por orden de llegada desde ahorita: si se acaban, te anotas a la lista de espera y entras automático a esa hora si el top no ocupó todos sus lugares.`,
+      `Los otros ${reservados} están apartados para el top ${f.top_n} hasta las 6:00 pm del domingo (${formatFechaHora(f.ventana_cierra)}). Estos y la lista de espera se ordenan 60% por tu lugar en puntos, 40% por qué tan rápido te anotaste — no es orden de llegada puro. Si se acaban, te anotas a la lista de espera con esa misma mezcla.`,
     ]);
   }
   if (f.ventana_cerrada) {
@@ -251,10 +255,13 @@ function renderAcciones(f, profile, refresh) {
       acciones.appendChild(renderEsperandoPareja(f, refresh));
     }
     if (enEspera) {
+      const d = f.mi_desglose_lugar;
       acciones.appendChild(el('div', { class: 'aviso aviso-warn' }, [
-        el('strong', {}, `Vas en el lugar ${f.mi_lugar_en_espera || '—'} de la lista. `),
-        f.ventana_abierta && f.formato === 'parejas'
-          ? 'Las parejas se ordenan por su promedio de puntos hasta las 6:00 pm del domingo, así que esto todavía puede moverse.'
+        el('strong', {}, `Vas en el lugar ${(d && d.lugar) || f.mi_lugar_en_espera || '—'} de la lista${d ? ` de ${d.de_cuantos}` : ''}. `),
+        f.ventana_abierta
+          ? (d
+              ? `Por puntos ibas en el lugar ${d.rank_puntos}, por tiempo de registro en el ${d.rank_tiempo} — la combinación te da el ${d.lugar}. Todavía puede moverse hasta las 6:00 pm del domingo.`
+              : 'Se reparte 60% por puntos y 40% por tiempo de registro, así que esto todavía puede moverse hasta las 6:00 pm del domingo.')
           : 'En cuanto alguien se dé de baja, el primero de la lista entra automático.',
       ]));
     }

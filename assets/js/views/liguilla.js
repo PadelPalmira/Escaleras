@@ -1,13 +1,14 @@
 import { el, formatFecha, avatarContent, toast, humanizeError, confirmSheet, ahora } from '../utils.js';
 import { icon } from '../icons.js';
 import {
-  getMyProfile, getMiCategoria, tiersElegiblesPorCategoria, getEventoLiguillaActivo,
+  getMyProfile, getMiSituacionCategorias, tiersElegibles, getEventoLiguillaActivo,
   getMiCalificacionLiguilla, getCalificadosConfirmados, getParejasLiguilla, getMiParejaLiguilla,
   getPickActualDraft, getPartidosLiguilla, responderCalificacionLiguilla, hacerPickDraft, responderPickDraft,
   autoprogramarLiguillaMes, getEventoLiguillaDelMes, getLiguillaTablaVivo, getMiCarreraLiguilla,
 } from '../api.js';
 
-const TIER_LABEL = { liguilla_a: 'Liguilla · Categoría A', ascenso_b: 'Torneo de Ascenso · Categoría B' };
+const TIER_LABEL = { liguilla_a: 'Liguilla · Categoría A', ascenso_b: 'Liguilla Categoría B' };
+const TIER_TITLE_CORTO = { liguilla_a: 'Liguilla A', ascenso_b: 'Liguilla Categoría B' };
 const EVENT_STATUS_LABEL = {
   scheduled: { text: 'Programado', cls: 'badge-neutral' },
   qualifying: { text: 'Confirmando', cls: 'badge-warning' },
@@ -36,8 +37,8 @@ const PURPOSE_LABEL = {
 export async function renderLiguilla() {
   const profile = await getMyProfile();
   if (!profile) return el('div', { class: 'empty-state' }, 'No se pudo cargar tu perfil.');
-  const categoria = await getMiCategoria(profile.id);
-  const tiers = tiersElegiblesPorCategoria(categoria);
+  const situacion = await getMiSituacionCategorias(profile.id);
+  const tiers = tiersElegibles(situacion ? situacion.porCategoria : {});
 
   const wrap = el('div');
   const header = el('div', { class: 'row-between mb-2' }, [
@@ -49,15 +50,57 @@ export async function renderLiguilla() {
   if (tiers.length === 0) {
     wrap.appendChild(el('div', { class: 'empty-state' }, [
       el('div', { class: 'emoji' }, '🏆'),
-      el('p', {}, 'Todavía no tienes categoría calculada — no puedes calificar todavía.'),
+      el('p', {}, 'Todavía no calificas a ninguna Liguilla. Se abre a los mejores del ranking en vivo de cada categoría — A y B por separado — y se recalcula con cada noche que juegas.'),
     ]));
     return wrap;
   }
 
-  const tier = tiers[0];
+  async function refresh(oldWrap) {
+    const fresh = await renderLiguilla();
+    oldWrap.replaceWith(fresh);
+  }
+
+  // Un jugador puede calificar a la Liguilla de A y a la de B el mismo mes
+  // si juega bien en las dos — son categorías independientes. Si califica a
+  // ambas, se le da un selector para no amontonar todo en una sola pantalla.
+  let tierActivo = tiers[0];
+  const tabsWrap = el('div', { class: 'tabs mb-3' });
+  const bodyWrap = el('div');
+
+  function pintarTabs() {
+    tabsWrap.innerHTML = '';
+    if (tiers.length < 2) return;
+    tiers.forEach((t) => {
+      tabsWrap.appendChild(el('button', {
+        class: `tab-chip ${tierActivo === t ? 'active' : ''}`,
+        onclick: async () => { tierActivo = t; pintarTabs(); await pintarCuerpo(); },
+      }, TIER_TITLE_CORTO[t] || t));
+    });
+  }
+
+  async function pintarCuerpo() {
+    bodyWrap.innerHTML = '';
+    bodyWrap.appendChild(await renderCuerpoTier(tierActivo, profile, () => refresh(wrap)));
+  }
+
+  pintarTabs();
+  wrap.appendChild(tabsWrap);
+  wrap.appendChild(bodyWrap);
+  await pintarCuerpo();
+
+  wrap.appendChild(el('p', { class: 'text-tiny mt-6', style: 'text-align:center;' }, 'Esta pantalla no se actualiza sola — usa "Actualizar" arriba para ver movimientos nuevos.'));
+
+  return wrap;
+}
+
+/* Todo lo específico de UN tier: la carrera del mes, la calificación, el
+   draft y el bracket. Se repinta al cambiar de pestaña cuando alguien
+   califica a las dos Liguillas el mismo mes. */
+async function renderCuerpoTier(tier, profile, onChange) {
+  const wrap = el('div');
 
   // La Liguilla del mes se programa sola: la fecha sale del horario semanal
-  // (siempre la última noche de Parejas Fijas del mes de tu categoría), así
+  // (siempre la última noche de Parejas Fijas del mes de esa categoría), así
   // que el jugador la ve desde el primer día del mes aunque las
   // convocatorias de esa semana todavía no existan.
   let eventoMes = null;
@@ -68,14 +111,9 @@ export async function renderLiguilla() {
     console.error('No se pudo programar/leer la Liguilla del mes:', err);
   }
 
-  wrap.appendChild(await renderCarreraDelMes(tier, eventoMes, profile, () => refresh(wrap)));
+  wrap.appendChild(await renderCarreraDelMes(tier, eventoMes, profile, onChange));
 
-  async function refresh(oldWrap) {
-    const fresh = await renderLiguilla();
-    oldWrap.replaceWith(fresh);
-  }
-
-  const evento = await getEventoLiguillaActivo(tiers);
+  const evento = await getEventoLiguillaActivo([tier]);
   if (!evento) return wrap;
 
   // La tarjeta de arriba ya dice cuándo es y cómo va la carrera; esta solo
@@ -96,17 +134,15 @@ export async function renderLiguilla() {
   const misCalificacion = await getMiCalificacionLiguilla(evento.id, profile.id);
 
   if (evento.status === 'scheduled' || evento.status === 'qualifying') {
-    wrap.appendChild(renderSeccionCalificacion(misCalificacion, evento, () => refresh(wrap)));
+    wrap.appendChild(renderSeccionCalificacion(misCalificacion, evento, onChange));
   } else if (evento.status === 'draft_open') {
-    wrap.appendChild(await renderSeccionDraft(evento, profile, misCalificacion, () => refresh(wrap)));
+    wrap.appendChild(await renderSeccionDraft(evento, profile, misCalificacion, onChange));
   } else if (evento.status === 'confirmed' || evento.status === 'in_progress' || evento.status === 'completed') {
     wrap.appendChild(await renderBracket(evento, profile));
   } else if (evento.status === 'cancelled_no_players') {
     wrap.appendChild(el('div', { class: 'card' }, el('p', { class: 'text-muted' }, 'Esta edición no se pudo realizar por falta de jugadores.')));
     wrap.appendChild(await renderBracket(evento, profile));
   }
-
-  wrap.appendChild(el('p', { class: 'text-tiny mt-6', style: 'text-align:center;' }, 'Esta pantalla no se actualiza sola — usa "Actualizar" arriba para ver movimientos nuevos.'));
 
   return wrap;
 }
@@ -119,7 +155,7 @@ export async function renderLiguilla() {
 async function renderCarreraDelMes(tier, eventoMes, profile, onChange) {
   const wrap = el('div', { class: 'mb-4' });
 
-  const titulo = tier === 'liguilla_a' ? 'Liguilla · Categoría A' : 'Torneo de Ascenso · Categoría B';
+  const titulo = TIER_LABEL[tier] || tier;
   const hero = el('div', { class: 'card card-hero' });
   hero.appendChild(el('div', { class: 'row-between' }, [
     el('div', { class: 'h2' }, [
@@ -420,7 +456,7 @@ async function renderBracket(evento, profile) {
           ])
         );
         if (p.wildcard_next_month && soyYo) {
-          list.appendChild(el('p', { class: 'text-tiny mt-1' }, '🎟️ Tienen un lugar garantizado en Categoría A el próximo mes.'));
+          list.appendChild(el('p', { class: 'text-tiny mt-1' }, `🎟️ Tienen un lugar garantizado en ${TIER_LABEL[evento.tier] || 'la Liguilla'} el próximo mes.`));
         }
       });
     wrap.appendChild(list);

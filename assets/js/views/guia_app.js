@@ -1,6 +1,6 @@
 import { el, ahora } from '../utils.js';
 import { icon } from '../icons.js';
-import { updateMyProfile, getMiCategoria } from '../api.js';
+import { updateMyProfile, getMiSituacionCategorias } from '../api.js';
 import { textoDia } from '../niveles.js';
 
 /**
@@ -13,8 +13,8 @@ import { textoDia } from '../niveles.js';
  *  - A un jugador que ya tenía cuenta de antes de que esta guía existiera
  *    (esNuevo: false) — la primera vez que entra tras esta actualización.
  *    En este caso no hay `recomendacion`: en su lugar se consulta su
- *    categoría ya calculada (si el sistema ya tiene suficiente historial
- *    suyo) para mostrarla en el mismo espacio.
+ *    situación real en cada categoría (A y/o B, si el sistema ya tiene
+ *    suficiente historial suyo) para mostrarla en el mismo espacio.
  *
  * En ambos casos, terminar la guía (o saltarla) marca
  * profiles.app_guide_seen_at para que nunca se vuelva a mostrar sola.
@@ -22,8 +22,8 @@ import { textoDia } from '../niveles.js';
 export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }) {
   const wrap = el('div', { class: 'guia-app' });
   let index = 0;
-  let categoriaActual = null;
-  let categoriaCargada = esNuevo; // a un jugador nuevo no le consultamos categoría — usa `recomendacion`.
+  let situacionActual = null;
+  let situacionCargada = esNuevo; // a un jugador nuevo no le consultamos su situación — usa `recomendacion`.
 
   const slides = buildSlides();
 
@@ -69,7 +69,7 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
         icon.info,
         esNuevo ? '¡Bienvenido a Escaleras Palmira!' : '¡Qué bueno tenerte de vuelta!',
         esNuevo
-          ? ['Esta es la liga interna del club: juegas, ganas puntos, subes de categoría, y una vez al mes hay Liguilla para pelear tu lugar en la categoría A.', 'Esta guía rápida te explica cómo funciona todo — te toma menos de un minuto.']
+          ? ['Esta es la liga interna del club: eliges cada semana si juegas en Categoría A o en Categoría B, ganas puntos, y una vez al mes hay Liguilla para pelear tu lugar arriba.', 'Esta guía rápida te explica cómo funciona todo — te toma menos de un minuto.']
           : ['Actualizamos varias cosas en el sistema desde la última vez que jugaste — sobre todo cómo funcionan las convocatorias y la cancha 1.', 'Esta guía rápida te deja al día en menos de un minuto.']
       )),
     });
@@ -98,19 +98,19 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
     arr.push({
       render: () => Promise.resolve(slideCard(
         icon.coin,
-        'Tus puntos y tu categoría',
-        ['Ganas puntos por cada game y por ganar el partido — y más si juegas en cancha 1.', 'Tu categoría (A o B) se recalcula cada domingo según tu PROMEDIO de puntos por noche de tus últimas 6 escaleras — no es algo fijo para siempre.', 'El detalle completo con todas las cifras está siempre en la pestaña Reglas.']
+        'Tus puntos, categoría por categoría',
+        ['Ganas puntos por cada game y por ganar el partido — y más si juegas en cancha 1.', 'A y B llevan su propio ranking, cada uno con tu PROMEDIO de puntos por noche de tus últimas 6 escaleras ahí. No hay ascenso ni descenso automático: tú eliges cada semana en cuál anotarte.', 'El detalle completo con todas las cifras está siempre en la pestaña Reglas.']
       )),
     });
 
     arr.push({
       render: async () => {
         if (recomendacion) return slideRecomendacion(recomendacion);
-        if (!categoriaCargada) {
-          try { categoriaActual = await getMiCategoria(profile.id); } catch (err) { categoriaActual = null; }
-          categoriaCargada = true;
+        if (!situacionCargada) {
+          try { situacionActual = await getMiSituacionCategorias(profile.id); } catch (err) { situacionActual = null; }
+          situacionCargada = true;
         }
-        return slideCategoriaActual(categoriaActual);
+        return slideSituacionActual(situacionActual);
       },
     });
 
@@ -137,31 +137,56 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
     card.appendChild(el('div', { class: 'h2 mt-4 mb-3' }, 'Tu nivel recomendado'));
     card.appendChild(el('p', { class: 'text-muted', style: 'font-size:14.5px;line-height:1.6;' }, `Nos dijiste ${rec.nivelLabel} — con eso, para empezar:`));
     const box = el('div', { class: 'card mt-3', style: 'background:var(--surface-2);' });
-    box.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:0.04em;' }, rec.modo === 'retas' ? 'Retas Abiertas' : `Categoría ${rec.categoria}`));
+    const tituloBox = rec.modo === 'retas' ? 'Retas Abiertas'
+      : rec.modo === 'opciones' ? 'Categoría A o Categoría B'
+      : rec.modo === 'femenil' ? 'Retas Abiertas (femenil, próximamente)'
+      : `Categoría ${rec.categoria}`;
+    box.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:0.04em;' }, tituloBox));
     if (rec.modo === 'retas') {
       box.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, '100% social, sin presión de puntos — perfecto para agarrar ritmo. Cuando quieras, también puedes anotarte directo a Categoría B.'));
+    } else if (rec.modo === 'opciones') {
+      box.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, 'Las dos son válidas para tu nivel — tú eliges cada semana en cuál anotarte, según cómo te sientas ese día.'));
+    } else if (rec.modo === 'femenil') {
+      box.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, 'Todavía no tenemos escaleras femeniles activas. Mientras se abren, puedes jugar en Retas Abiertas y anotarte a la lista de interesadas de Femenil A y/o Femenil B — en cuanto una junte suficientes jugadoras, se abre y te avisamos.'));
     }
-    if (rec.dias.length) {
+    if (rec.modo === 'opciones' && rec.diasPorCategoria) {
+      ['A', 'B'].forEach((cat) => {
+        const dias = rec.diasPorCategoria[cat] || [];
+        if (!dias.length) return;
+        const lista = el('div', { class: 'stack gap-1 mt-3' });
+        lista.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:700;' }, `Categoría ${cat}:`));
+        dias.forEach((ws) => lista.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:600;' }, `📅 ${textoDia(ws)}`)));
+        box.appendChild(lista);
+      });
+    } else if (rec.dias.length) {
       const lista = el('div', { class: 'stack gap-1 mt-3' });
       rec.dias.forEach((ws) => lista.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:600;' }, `📅 ${textoDia(ws)}`)));
       box.appendChild(lista);
     }
     card.appendChild(box);
-    card.appendChild(el('p', { class: 'text-tiny text-muted mt-3' }, 'No es definitivo — en cuanto juegues, el sistema te ubica solo según tus resultados reales.'));
+    card.appendChild(el('p', { class: 'text-tiny text-muted mt-3' }, 'No es definitivo — es solo para empezar. Tu lugar real en cada categoría se calcula con tus resultados, y puedes cambiar de convocatoria cuando quieras.'));
     return card;
   }
 
-  function slideCategoriaActual(cat) {
+  function slideSituacionActual(situacion) {
     const card = el('div', {});
     card.appendChild(el('div', { class: 'guia-icon' }, [el('span', { html: icon.trophy })]));
-    card.appendChild(el('div', { class: 'h2 mt-4 mb-3' }, 'Tu categoría'));
-    if (cat && cat.category) {
-      const box = el('div', { class: 'card mt-1', style: 'background:var(--surface-2);' });
-      box.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:0.04em;' }, `Categoría ${cat.category}`));
-      box.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, 'Se recalcula cada domingo con tu promedio de puntos por noche de las últimas 6 escaleras — puedes ver el detalle completo en la pestaña Ranking.'));
-      card.appendChild(box);
+    card.appendChild(el('div', { class: 'h2 mt-4 mb-3' }, 'Tu ranking'));
+    const porCategoria = situacion ? situacion.porCategoria : null;
+    const categoriasConDatos = porCategoria ? ['A', 'B'].filter((c) => porCategoria[c]) : [];
+    if (categoriasConDatos.length > 0) {
+      categoriasConDatos.forEach((cat) => {
+        const datos = porCategoria[cat];
+        const box = el('div', { class: 'card mt-2', style: 'background:var(--surface-2);' });
+        box.appendChild(el('div', { class: 'row-between' }, [
+          el('div', { class: 'text-tiny', style: 'font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:0.04em;' }, `Categoría ${cat}`),
+          el('span', {}, datos.rank != null ? `#${datos.rank}` : '—'),
+        ]));
+        box.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, 'Es tu lugar en vivo, con tu promedio de puntos por noche de las últimas 6 escaleras en esta categoría — puedes ver el detalle completo en la pestaña Ranking.'));
+        card.appendChild(box);
+      });
     } else {
-      card.appendChild(el('p', { class: 'text-muted', style: 'font-size:14.5px;line-height:1.6;' }, 'Todavía no tenemos suficiente historial reciente tuyo para calcular tu categoría — en cuanto juegues tus próximas escaleras, el sistema te ubica solo.'));
+      card.appendChild(el('p', { class: 'text-muted', style: 'font-size:14.5px;line-height:1.6;' }, 'Todavía no tenemos suficiente historial reciente tuyo en A ni en B — en cuanto juegues tus próximas escaleras, tu ranking aparece solo.'));
     }
     return card;
   }
@@ -172,7 +197,7 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
     card.appendChild(el('div', { class: 'h2 mt-4 mb-3' }, 'Un tour rapidísimo'));
     const items = [
       [icon.home, 'Inicio', 'tu próxima sesión y tu resumen del momento.'],
-      [icon.ranking, 'Ranking', 'tu categoría, tu puntaje y el de todo el club.'],
+      [icon.ranking, 'Ranking', 'tu lugar en A y en B, y el de todo el club.'],
       [icon.calendar, 'Convocatorias', 'confirma tu lugar, busca sustituto o cancela.'],
       [icon.book, 'Reglas', 'el reglamento completo, siempre a la mano.'],
       [icon.user, 'Perfil', 'tu historial, multas y notificaciones.'],

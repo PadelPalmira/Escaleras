@@ -78,40 +78,47 @@ export async function borrarFotoPerfil() {
    Categoría / ranking
    ============================================================ */
 
-/** Última fecha de corte (week_start_date) con snapshots calculados. */
-async function ultimaFechaSnapshot() {
-  const { data, error } = await supabase
-    .from('category_snapshots')
-    .select('week_start_date')
-    .order('week_start_date', { ascending: false })
-    .limit(1);
-  if (error) throw error;
-  return data && data[0] ? data[0].week_start_date : null;
-}
-
-export async function getMiCategoria(playerId) {
-  const { data, error } = await supabase
-    .from('category_snapshots')
-    .select('*')
-    .eq('player_id', playerId)
-    .order('week_start_date', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+/**
+ * Ya no hay una categoría asignada por semana: cada quien elige libremente
+ * en qué convocatoria (A o B) anotarse, y su ranking en cada una depende
+ * solo de lo que jugó ahí — puede tener posición en las dos, en una, o en
+ * ninguna todavía. Esto reemplaza a getMiCategoria().
+ *
+ * Devuelve: { recomendacion: {opciones,retas,femenil}|null,
+ *   porCategoria: { A: {rank,promedio,rolling_points,escaleras_counted,
+ *     provisional,elegible_liguilla}|null, B: {...}|null } }
+ */
+export async function getMiSituacionCategorias(playerId) {
+  const { data, error } = await supabase.rpc('mi_situacion_categorias', { p_player_id: playerId });
   if (error) throw error;
   return data;
 }
 
-/** Ranking completo de la última semana calculada, con nombre de jugador. */
+/** Ranking EN VIVO de A y de B (ya no es una foto fija de la última semana:
+    se recalcula con cada noche jugada, igual que tus puntos). */
 export async function getRankingCompleto() {
-  const fecha = await ultimaFechaSnapshot();
-  if (!fecha) return { fecha: null, filas: [] };
-  const { data, error } = await supabase
-    .from('category_snapshots')
-    .select('*, profiles(full_name, avatar_url)')
-    .eq('week_start_date', fecha)
-    .order('rank', { ascending: true, nullsFirst: false });
+  const { data, error } = await supabase.rpc('ranking_completo_vivo');
   if (error) throw error;
-  return { fecha, filas: data };
+  return { filas: data || [] };
+}
+
+/**
+ * Lista de interesadas en Femenil A / Femenil B — todavía no hay escaleras
+ * femeniles activas, esto solo junta interés hasta que una llegue al umbral.
+ * Devuelve { A: {interesada,conteo,abierta,umbral}, B: {...} }.
+ */
+export async function getMiInteresFemenil(playerId) {
+  const { data, error } = await supabase.rpc('mi_interes_femenil', { p_player_id: playerId });
+  if (error) throw error;
+  return data;
+}
+
+/** Anota o quita a un jugador de la lista de interesadas de una categoría
+    femenil ('A' o 'B'). Devuelve el mismo shape que getMiInteresFemenil. */
+export async function alternarInteresFemenil(playerId, category) {
+  const { data, error } = await supabase.rpc('alternar_interes_femenil', { p_player_id: playerId, p_category: category });
+  if (error) throw error;
+  return data;
 }
 
 /* ============================================================
@@ -354,18 +361,22 @@ export async function getMiHistorialPuntos(playerId, limite = 30) {
 }
 
 /* ============================================================
-   Liguilla / Torneo de Ascenso
+   Liguilla / Liguilla Categoría B
    ============================================================ */
 
-/** A/B (o ambos, si está en Zona Límite) según la categoría vigente del jugador. */
-export function tiersElegiblesPorCategoria(categoria) {
-  if (!categoria) return [];
-  if (categoria.category === 'A') return ['liguilla_a'];
-  if (categoria.category === 'B') return ['ascenso_b'];
-  if (categoria.category === 'limite') {
-    return categoria.zona_limite_side === 'bottom_a' ? ['liguilla_a'] : ['ascenso_b'];
-  }
-  return [];
+/**
+ * A qué Liguilla(s) calificas este mes: ya no depende de "tu categoría"
+ * (no existe una sola) sino de tu posición EN VIVO en cada categoría donde
+ * juegas. Si estás entre los primeros tanto en A como en B, calificas a
+ * las dos el mismo mes — antes era imposible porque solo podías estar en
+ * una categoría a la vez.
+ * `porCategoria` es el mismo objeto que devuelve getMiSituacionCategorias().
+ */
+export function tiersElegibles(porCategoria) {
+  const tiers = [];
+  if (porCategoria && porCategoria.A && porCategoria.A.elegible_liguilla) tiers.push('liguilla_a');
+  if (porCategoria && porCategoria.B && porCategoria.B.elegible_liguilla) tiers.push('ascenso_b');
+  return tiers;
 }
 
 /** El evento de Liguilla/Ascenso más reciente para alguno de los tiers dados (cualquier estado). */
@@ -383,7 +394,7 @@ export async function getEventoLiguillaActivo(tiers) {
 }
 
 /**
- * Crea (si falta) la Liguilla y el Torneo de Ascenso del mes. Es idempotente
+ * Crea (si falta) la Liguilla y la Liguilla Categoría B del mes. Es idempotente
  * y la fecha sale del horario semanal, no de las convocatorias: por eso el
  * jugador ve la fecha del mes desde el primer día, aunque las convocatorias
  * de esa semana todavía no existan.

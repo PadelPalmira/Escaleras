@@ -1,7 +1,7 @@
 import { el, todayISO, formatFecha, formatHora, avatarContent } from '../utils.js';
 import { icon } from '../icons.js';
 import {
-  getMyProfile, getMiCategoria, getMisRegistros, tiersElegiblesPorCategoria,
+  getMyProfile, getMiSituacionCategorias, getMisRegistros, tiersElegibles,
   getEventoLiguillaActivo, getMiCalificacionLiguilla,
   esAdminOMaestro, esMaestro, getEscalerasAdmin, getConteosRegistros,
   getMiRondaActual, horaServidor,
@@ -10,8 +10,8 @@ import {
 import { navigate } from '../router.js';
 import { abrirNoche } from './admin_escaleras.js';
 
-const CAT_LABEL = { A: 'Categoría A', B: 'Categoría B', limite: 'Zona Límite' };
-const CAT_BADGE_CLASS = { A: 'badge-a', B: 'badge-b', limite: 'badge-limite' };
+const CAT_LABEL = { A: 'Categoría A', B: 'Categoría B' };
+const CAT_BADGE_CLASS = { A: 'badge-a', B: 'badge-b' };
 
 const STATUS_LABEL = {
   confirmed: { text: 'Confirmado', cls: 'badge-success' },
@@ -34,7 +34,9 @@ export async function renderHome() {
 
 async function renderInicioJugador(profile) {
   const registros = await getMisRegistros({ soloFuturas: true });
-  const categoria = profile ? await getMiCategoria(profile.id) : null;
+  const situacion = profile ? await getMiSituacionCategorias(profile.id) : null;
+  const porCategoria = situacion ? situacion.porCategoria : {};
+  const categoriasConDatos = ['A', 'B'].filter((c) => porCategoria[c]);
   // Si la noche está en juego ahorita, esto es lo único que le importa al
   // jugador: en qué cancha le toca y con quién.
   let miRonda = null;
@@ -120,44 +122,42 @@ async function renderInicioJugador(profile) {
     );
   }
 
-  // Categoría / stats
-  wrap.appendChild(el('div', { class: 'section-title' }, 'Tu categoría'));
-  if (categoria) {
-    wrap.appendChild(
-      el('div', { class: 'card' }, [
-        el('div', { class: 'row-between' }, [
-          el('span', { class: `badge ${CAT_BADGE_CLASS[categoria.category] || 'badge-neutral'}` }, CAT_LABEL[categoria.category] || categoria.category),
-          categoria.zona_limite_side
-            ? el('span', { class: `badge ${categoria.zona_limite_side === 'bottom_a' ? 'badge-danger' : 'badge-success'}` },
-                categoria.zona_limite_side === 'bottom_a' ? 'Zona de descenso' : 'Zona de ascenso')
-            : null,
-        ]),
-        el('div', { class: 'grid-3 mt-4' }, [
-          el('div', { class: 'stat-tile' }, [
-            el('div', { class: 'stat-value' }, categoria.rank != null ? `#${categoria.rank}` : '—'),
-            el('div', { class: 'stat-label' }, 'Posición'),
+  // Tu posición EN CADA categoría: ya no hay una sola "tu categoría" — cada
+  // quien elige dónde jugar, así que puede tener lugar en A, en B, en las
+  // dos, o en ninguna todavía.
+  wrap.appendChild(el('div', { class: 'section-title' }, 'Tu ranking'));
+  if (categoriasConDatos.length > 0) {
+    categoriasConDatos.forEach((cat) => {
+      const c = porCategoria[cat];
+      wrap.appendChild(
+        el('div', { class: 'card mt-2' }, [
+          el('div', { class: 'row-between' }, [
+            el('span', { class: `badge ${CAT_BADGE_CLASS[cat]}` }, CAT_LABEL[cat]),
+            c.provisional ? el('span', { class: 'badge badge-warning' }, 'Provisional') : null,
           ]),
-          // El numero grande tiene que ser EL MISMO que el del Ranking: el
-          // promedio por noche. Antes aqui salia la suma y en Ranking el
-          // promedio, y eran dos respuestas distintas a "cuantos puntos tengo".
-          el('div', { class: 'stat-tile' }, [
-            el('div', { class: 'stat-value' }, (() => {
-              const n = Number(categoria.escaleras_counted || 0);
-              return n > 0 ? (Number(categoria.rolling_points) / n).toFixed(0) : '—';
-            })()),
-            el('div', { class: 'stat-label' }, 'Prom. x noche'),
+          el('div', { class: 'grid-3 mt-4' }, [
+            el('div', { class: 'stat-tile' }, [
+              el('div', { class: 'stat-value' }, c.rank != null ? `#${c.rank}` : '—'),
+              el('div', { class: 'stat-label' }, 'Posición'),
+            ]),
+            // El numero grande tiene que ser EL MISMO que el del Ranking: el
+            // promedio por noche, no la suma.
+            el('div', { class: 'stat-tile' }, [
+              el('div', { class: 'stat-value' }, c.escaleras_counted > 0 ? Math.round(c.promedio) : '—'),
+              el('div', { class: 'stat-label' }, 'Prom. x noche'),
+            ]),
+            el('div', { class: 'stat-tile' }, [
+              el('div', { class: 'stat-value' }, c.escaleras_counted != null ? c.escaleras_counted : '—'),
+              el('div', { class: 'stat-label' }, 'Noches'),
+            ]),
           ]),
-          el('div', { class: 'stat-tile' }, [
-            el('div', { class: 'stat-value' }, categoria.escaleras_counted != null ? categoria.escaleras_counted : '—'),
-            el('div', { class: 'stat-label' }, 'Noches' ),
-          ]),
-        ]),
-      ])
-    );
+        ])
+      );
+    });
   } else {
     wrap.appendChild(
       el('div', { class: 'card' }, [
-        el('p', { class: 'text-muted' }, 'Todavía no tienes categoría calculada. Se asigna en cuanto empiezas a jugar o declaras tu nivel al registrarte.'),
+        el('p', { class: 'text-muted' }, 'Todavía no tienes ranking en ninguna categoría. Se arma en cuanto empiezas a jugar en A o en B.'),
       ])
     );
   }
@@ -184,26 +184,27 @@ async function renderInicioJugador(profile) {
     wrap.appendChild(list);
   }
 
-  // Banner de Liguilla/Ascenso — solo si hay algo relevante para este jugador este mes.
+  // Banner de Liguilla/Ascenso — uno por cada torneo donde tengas
+  // movimientos pendientes. Como ahora se puede calificar a los dos el
+  // mismo mes (buen nivel en A y en B a la vez), se revisa cada tier por
+  // separado en vez de quedarse con uno solo.
   try {
-    const tiers = tiersElegiblesPorCategoria(categoria);
-    if (tiers.length > 0) {
-      const evento = await getEventoLiguillaActivo(tiers);
-      if (evento && !['completed', 'cancelled_no_players'].includes(evento.status)) {
-        const miCalificacion = await getMiCalificacionLiguilla(evento.id, profile.id);
-        if (miCalificacion) {
-          const titulo = evento.tier === 'liguilla_a' ? 'Liguilla' : 'Torneo de Ascenso';
-          wrap.appendChild(
-            el('div', { class: 'card mt-4', style: 'border-color:var(--cyan);', onclick: () => navigate('/liguilla') }, [
-              el('div', { class: 'row-between' }, [
-                el('div', { style: 'font-weight:700;' }, [el('span', { html: icon.trophy, style: 'width:16px;height:16px;vertical-align:-3px;margin-right:6px;color:var(--cyan);' }), titulo]),
-                el('span', { html: icon.chevronRight, style: 'width:18px;height:18px;color:var(--text-tertiary);' }),
-              ]),
-              el('p', { class: 'text-tiny mt-2' }, 'Tienes movimientos pendientes — toca para ver.'),
-            ])
-          );
-        }
-      }
+    const tiers = tiersElegibles(porCategoria);
+    for (const tier of tiers) {
+      const evento = await getEventoLiguillaActivo([tier]);
+      if (!evento || ['completed', 'cancelled_no_players'].includes(evento.status)) continue;
+      const miCalificacion = await getMiCalificacionLiguilla(evento.id, profile.id);
+      if (!miCalificacion) continue;
+      const titulo = tier === 'liguilla_a' ? 'Liguilla' : 'Liguilla Categoría B';
+      wrap.appendChild(
+        el('div', { class: 'card mt-4', style: 'border-color:var(--cyan);', onclick: () => navigate('/liguilla') }, [
+          el('div', { class: 'row-between' }, [
+            el('div', { style: 'font-weight:700;' }, [el('span', { html: icon.trophy, style: 'width:16px;height:16px;vertical-align:-3px;margin-right:6px;color:var(--cyan);' }), titulo]),
+            el('span', { html: icon.chevronRight, style: 'width:18px;height:18px;color:var(--text-tertiary);' }),
+          ]),
+          el('p', { class: 'text-tiny mt-2' }, 'Tienes movimientos pendientes — toca para ver.'),
+        ])
+      );
     }
   } catch (err) {
     // El banner de Liguilla nunca debe tumbar el Inicio si algo falla.
