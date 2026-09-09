@@ -164,6 +164,7 @@ export async function getJugadoresParaPareja(escaleraId, excluirPlayerId) {
     .from('profiles')
     .select('id, full_name, avatar_url')
     .eq('status', 'active')
+    .eq('role', 'jugador') // Admin/Maestro son recepción/dirección, nunca aparecen como pareja o sustituto disponible.
     .neq('id', excluirPlayerId)
     .order('full_name', { ascending: true });
   if (error) throw error;
@@ -534,8 +535,12 @@ export function esMaestro(profile) {
    Admin — jugadores (buscar, sustituir, multas, suspensiones)
    ============================================================ */
 
+/** Busca entre JUGADORES para agregarlos/sustituirlos/gestionarlos — nunca
+    devuelve cuentas de Admin/Maestro (son recepción/dirección, no gente
+    disponible para jugar). Si algún día una pantalla de verdad necesita
+    buscar staff, que sea una función aparte, no esta. */
 export async function buscarJugadores(query, limite = 20) {
-  let q = supabase.from('profiles').select('*').order('full_name', { ascending: true }).limit(limite);
+  let q = supabase.from('profiles').select('*').eq('role', 'jugador').order('full_name', { ascending: true }).limit(limite);
   const f = (query || '').trim();
   if (f) q = q.ilike('full_name', `%${f}%`);
   const { data, error } = await q;
