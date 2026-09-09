@@ -6,9 +6,9 @@ import {
   getMyProfile, updateMyProfile, getMiHistorialPuntos, signOut,
   getMisMultas, getMisSuspensiones, getMisNotificaciones, marcarNotificacionLeida,
   getMiSituacionCategorias, getMiInteresFemenil, alternarInteresFemenil, getAjusteNum,
-  subirFotoPerfil, borrarFotoPerfil,
+  subirFotoPerfil, borrarFotoPerfil, getWeekdayScheduleAll,
 } from '../api.js';
-import { esFemenil } from '../niveles.js';
+import { NIVELES, esFemenil, recomendacionPorNivel, textoDia } from '../niveles.js';
 
 const FINE_STATUS = { pending: { text: 'Pendiente', cls: 'badge-warning' }, paid: { text: 'Pagada', cls: 'badge-success' }, waived: { text: 'Condonada', cls: 'badge-neutral' } };
 const NOTIF_URGENT = new Set([
@@ -208,18 +208,63 @@ export async function renderPerfil() {
   wrap.appendChild(el('div', { class: 'section-title' }, 'Tus datos'));
   const nameInput = el('input', { class: 'input', type: 'text', value: profile.full_name || '' });
   const phoneInput = el('input', { class: 'input', type: 'tel', value: profile.phone || '', placeholder: '10 dígitos' });
+
+  const nivelSelect = el('select', { class: 'input' }, [
+    el('option', { value: '' }, profile.declared_level ? '(sin cambio)' : '¿Cuál es tu nivel de juego?'),
+    ...NIVELES.map((n) => el('option', { value: n.value }, n.label)),
+  ]);
+  if (profile.declared_level) nivelSelect.value = profile.declared_level;
+  const nivelRecBox = el('div', { class: 'card mt-2', style: 'display:none;background:var(--surface-2);' });
+  let weekdaySchedulesCache = null;
+  async function pintarNivelRec() {
+    const nivel = nivelSelect.value;
+    if (!nivel) { nivelRecBox.style.display = 'none'; return; }
+    if (!weekdaySchedulesCache) {
+      try { weekdaySchedulesCache = await getWeekdayScheduleAll(); } catch (err) { weekdaySchedulesCache = []; }
+    }
+    const rec = recomendacionPorNivel(nivel, weekdaySchedulesCache);
+    nivelRecBox.innerHTML = '';
+    if (!rec) { nivelRecBox.style.display = 'none'; return; }
+    nivelRecBox.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:0.04em;' }, 'Con ese nivel te recomendaríamos'));
+    if (rec.modo === 'retas') {
+      nivelRecBox.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, 'Retas Abiertas — o directo Categoría B si prefieres competir desde ya.'));
+    } else if (rec.modo === 'opciones') {
+      nivelRecBox.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, 'Categoría A o Categoría B — las dos son válidas, tú eliges cada semana.'));
+    } else if (rec.modo === 'femenil') {
+      nivelRecBox.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, 'Todavía no hay escaleras femeniles activas — Retas Abiertas mientras tanto, y puedes anotarte a la lista de interesadas aquí abajo.'));
+    } else {
+      nivelRecBox.appendChild(el('p', { class: 'text-muted mt-2', style: 'font-size:13.5px;' }, `Categoría ${rec.categoria}.`));
+    }
+    nivelRecBox.style.display = 'block';
+  }
+  nivelSelect.addEventListener('change', pintarNivelRec);
+
   const saveBtn = el('button', { class: 'btn btn-secondary mt-2' }, 'Guardar cambios');
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled = true; saveBtn.textContent = 'Guardando…';
     try {
-      await updateMyProfile({ full_name: nameInput.value.trim(), phone: phoneInput.value.trim() || null });
+      const payload = { full_name: nameInput.value.trim(), phone: phoneInput.value.trim() || null };
+      // El nivel solo se envía si el jugador de verdad eligió algo en el
+      // select — así nunca se borra un nivel ya declarado solo por guardar
+      // el nombre o el teléfono sin tocar ese campo.
+      if (nivelSelect.value) payload.declared_level = nivelSelect.value;
+      await updateMyProfile(payload);
       toast('Datos actualizados.', 'success');
+      navigate('/perfil');
     } catch (err) { toast(humanizeError(err), 'error'); }
     saveBtn.disabled = false; saveBtn.textContent = 'Guardar cambios';
   });
   wrap.appendChild(el('div', { class: 'card' }, [
     el('div', { class: 'field' }, [el('label', {}, 'Nombre completo'), nameInput]),
-    el('div', { class: 'field', style: 'margin-bottom:0;' }, [el('label', {}, 'Teléfono'), phoneInput]),
+    el('div', { class: 'field' }, [el('label', {}, 'Teléfono'), phoneInput]),
+    el('div', { class: 'field', style: 'margin-bottom:0;' }, [
+      el('label', {}, 'Tu nivel de juego' + (profile.declared_level ? ` (actual: ${(NIVELES.find((n) => n.value === profile.declared_level) || {}).label || profile.declared_level})` : '')),
+      nivelSelect,
+      el('p', { class: 'text-tiny mt-1' }, profile.declared_level
+        ? 'Solo es una recomendación de a dónde entrar — puedes cambiarla cuando quieras, no afecta tu lugar ya ganado en el Ranking.'
+        : 'Todavía no lo has declarado — sin esto no vemos qué convocatoria recomendarte, aunque puedes anotarte libremente a A o B mientras tanto.'),
+      nivelRecBox,
+    ]),
     saveBtn,
   ]));
 
