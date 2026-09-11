@@ -1,7 +1,34 @@
-import { el, avatarContent } from '../utils.js';
+import { el, avatarContent, toast, humanizeError } from '../utils.js';
+import { icon } from '../icons.js';
 import { getRankingCompleto, getSession, getAjusteNum } from '../api.js';
+import { generarTarjetaRanking, compartirTarjeta } from '../vendor/sharecard.js';
 
 const CAT_BADGE_CLASS = { A: 'badge-a', B: 'badge-b' };
+const CAT_LABEL = { A: 'Categoría A', B: 'Categoría B' };
+
+async function compartirRanking(filtro, dela, btn) {
+  const textoOriginal = btn.lastChild.textContent;
+  btn.disabled = true;
+  btn.lastChild.textContent = 'Generando…';
+  try {
+    const top = dela.slice(0, 8).map((f) => ({
+      rank: f.rank,
+      full_name: (f.profiles && f.profiles.full_name) || 'Jugador',
+      promedio: f.escaleras_counted > 0 ? Number(f.rolling_points) / Number(f.escaleras_counted) : 0,
+    }));
+    const canvas = await generarTarjetaRanking({ categoryLabel: CAT_LABEL[filtro] || filtro, filas: top });
+    await compartirTarjeta(canvas, {
+      archivo: `ranking-${filtro}.png`,
+      titulo: 'Ranking General — Escaleras Padel Palmira',
+      texto: `Ranking General — ${CAT_LABEL[filtro] || filtro}`,
+    });
+  } catch (err) {
+    toast(humanizeError(err), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.lastChild.textContent = textoOriginal;
+  }
+}
 
 export async function renderRanking() {
   const [{ filas }, session, minNoches] = await Promise.all([
@@ -32,6 +59,7 @@ export async function renderRanking() {
   const tabsWrap = el('div', { class: 'tabs' });
   const listWrap = el('div', { class: 'card' });
   const notaWrap = el('div');
+  const compartirWrap = el('div', { class: 'mb-3', style: 'text-align:right;' });
 
   const promedio = (f) => {
     const n = Number(f.escaleras_counted || 0);
@@ -58,6 +86,18 @@ export async function renderRanking() {
       'Te ordena tu PROMEDIO de puntos por noche de tus últimas 6 escaleras, no el total: jugar más veces no te sube de lugar.'));
     notaWrap.appendChild(el('p', { class: 'text-tiny mb-3' },
       'A y B son independientes: cada quien elige, cada semana, en cuál de las dos se anota. Tu lugar aquí solo depende de lo que juegues en esa categoría.'));
+
+    compartirWrap.innerHTML = '';
+    if (dela.length > 0) {
+      const btnCompartir = el('button', {
+        class: 'btn btn-secondary btn-sm', style: 'display:inline-flex;align-items:center;gap:6px;width:auto;',
+      }, [
+        el('span', { html: icon.share, style: 'width:16px;height:16px;' }),
+        el('span', {}, 'Compartir'),
+      ]);
+      btnCompartir.addEventListener('click', () => compartirRanking(filtro, dela, btnCompartir));
+      compartirWrap.appendChild(btnCompartir);
+    }
 
     listWrap.innerHTML = '';
     if (dela.length === 0) {
@@ -93,6 +133,7 @@ export async function renderRanking() {
   draw();
   wrap.appendChild(tabsWrap);
   wrap.appendChild(notaWrap);
+  wrap.appendChild(compartirWrap);
   wrap.appendChild(listWrap);
   wrap.appendChild(el('p', { class: 'text-tiny mt-3', style: 'color:var(--text-tertiary);' },
     `El número grande es tu promedio por noche. "Provisional" quiere decir que todavía no llegas a ${minNoches} noches jugadas en esa categoría: tu lugar en la lista todavía puede moverse mucho.`));

@@ -6,6 +6,7 @@ import {
   getPickActualDraft, getPartidosLiguilla, responderCalificacionLiguilla, hacerPickDraft, responderPickDraft,
   autoprogramarLiguillaMes, getEventoLiguillaDelMes, getLiguillaTablaVivo, getMiCarreraLiguilla,
 } from '../api.js';
+import { generarTarjetaLiguilla, compartirTarjeta } from '../vendor/sharecard.js';
 
 const TIER_LABEL = { liguilla_a: 'Liguilla · Categoría A', ascenso_b: 'Liguilla Categoría B' };
 const TIER_TITLE_CORTO = { liguilla_a: 'Liguilla A', ascenso_b: 'Liguilla Categoría B' };
@@ -391,6 +392,42 @@ async function renderParejasFormadas(evento, profile) {
   return wrap;
 }
 
+/* ============================================================
+   Compartir el resultado final de la Liguilla — imagen tipo
+   historia (9:16) con el podio de parejas, sin datos personales
+   (mismo criterio que el podio de la noche).
+   ============================================================ */
+async function compartirResultadoLiguilla(evento, parejas, btn) {
+  const textoOriginal = btn.lastChild.textContent;
+  btn.disabled = true;
+  btn.lastChild.textContent = 'Generando…';
+  try {
+    const resultados = parejas
+      .filter((p) => p.final_placement)
+      .sort((a, b) => a.final_placement - b.final_placement)
+      .map((p) => ({
+        final_placement: p.final_placement,
+        nombre1: p.player1?.full_name || '—',
+        nombre2: p.player2?.full_name || '—',
+      }));
+    const canvas = await generarTarjetaLiguilla({
+      tierLabel: TIER_LABEL[evento.tier] || evento.tier,
+      eventDateLabel: evento.event_date ? formatFecha(evento.event_date) : '',
+      resultados,
+    });
+    await compartirTarjeta(canvas, {
+      archivo: `liguilla-${evento.tier}.png`,
+      titulo: 'Resultados de Liguilla — Escaleras Padel Palmira',
+      texto: `Resultados de ${TIER_LABEL[evento.tier] || 'la Liguilla'}`,
+    });
+  } catch (err) {
+    toast(humanizeError(err), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.lastChild.textContent = textoOriginal;
+  }
+}
+
 async function renderBracket(evento, profile) {
   const [parejas, partidos] = await Promise.all([getParejasLiguilla(evento.id), getPartidosLiguilla(evento.id)]);
   const parejaPorId = new Map(parejas.map((p) => [p.id, p]));
@@ -441,7 +478,19 @@ async function renderBracket(evento, profile) {
 
   const campeones = parejas.filter((p) => p.final_placement === 1);
   if (campeones.length > 0) {
-    wrap.appendChild(el('div', { class: 'section-title' }, 'Resultado final'));
+    wrap.appendChild(el('div', { class: 'row-between' }, [
+      el('div', { class: 'section-title', style: 'margin-bottom:0;' }, 'Resultado final'),
+      (() => {
+        const btnCompartir = el('button', {
+          class: 'btn btn-secondary btn-sm', style: 'display:inline-flex;align-items:center;gap:6px;width:auto;',
+        }, [
+          el('span', { html: icon.share, style: 'width:16px;height:16px;' }),
+          el('span', {}, 'Compartir'),
+        ]);
+        btnCompartir.addEventListener('click', () => compartirResultadoLiguilla(evento, parejas, btnCompartir));
+        return btnCompartir;
+      })(),
+    ]));
     const list = el('div', { class: 'card' });
     parejas
       .filter((p) => p.final_placement)

@@ -9,7 +9,9 @@ import {
   comenzarEscalera, adminAgregarJugador, getAjusteNum,
   iniciarCronometroRonda, horaServidor,
   responderInvitacionPareja, reemplazarJugadorEnCancha,
+  podioDeNoche,
 } from '../api.js';
+import { generarTarjetaNoche, compartirTarjeta } from '../vendor/sharecard.js';
 
 /* El Inicio del Admin manda directo a UNA noche. Se guarda aquí cuál para
    que al entrar a la pantalla se abra esa, en vez de dejar a recepción
@@ -328,6 +330,13 @@ async function pintarDetalle(wrap, escaleraId) {
   } else if (esc.status === 'completed') {
     accionesFinales.appendChild(el('p', { class: 'text-muted' },
       'Esta noche ya está cerrada. Para corregir un resultado, usa "Corregir" en el partido correspondiente.'));
+    accionesFinales.appendChild(el('button', {
+      class: 'btn btn-secondary', style: 'display:flex;align-items:center;justify-content:center;gap:8px;',
+      onclick: (e) => compartirResultadosNoche(esc, e.target),
+    }, [
+      el('span', { html: icon.share, style: 'width:18px;height:18px;' }),
+      'Compartir resultados',
+    ]));
   } else {
     if (ultimaRonda.round_number < tope) {
       accionesFinales.appendChild(el('button', { class: 'btn btn-secondary', onclick: async (e) => {
@@ -963,6 +972,50 @@ function abrirAgregarJugador(esc, ws, refresh) {
   content.appendChild(resumen);
   content.appendChild(lista);
   const handle = openSheet(content);
+}
+
+/* ============================================================
+   Compartir el podio de la noche — imagen tipo historia (9:16) con
+   el 1º/2º/3º lugar (o 1º/2º en Parejas), lista para WhatsApp/
+   Instagram. Es el mismo podio con el que ya se repartieron los
+   cashbacks — no se inventa un cálculo aparte.
+   ============================================================ */
+async function compartirResultadosNoche(esc, btn) {
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '';
+  btn.appendChild(el('span', {}, 'Generando imagen…'));
+  try {
+    const filas = await podioDeNoche(esc.id);
+    if (!filas.length) {
+      toast('Esta noche no tiene podio de cashbacks que compartir (Retas Abiertas no reparte).', 'info', 5000);
+      return;
+    }
+    const porLugar = new Map();
+    filas.forEach((f) => {
+      if (!porLugar.has(f.place)) porLugar.set(f.place, { place: f.place, nombres: [], amount_mxn: f.amount_mxn });
+      porLugar.get(f.place).nombres.push(f.full_name || '(sin nombre)');
+    });
+    const grupos = Array.from(porLugar.values()).sort((a, b) => a.place - b.place);
+
+    const canvas = await generarTarjetaNoche({
+      sessionDateLabel: formatFecha(esc.session_date),
+      formatoLabel: FORMAT_LABEL[esc.format] || esc.format,
+      categoryLabel: esc.category ? `Categoría ${esc.category}` : '',
+      grupos,
+    });
+    await compartirTarjeta(canvas, {
+      archivo: `resultados-${esc.session_date}.png`,
+      titulo: 'Resultados de la noche — Escaleras Padel Palmira',
+      texto: `Resultados de la noche del ${formatFecha(esc.session_date)}`,
+    });
+  } catch (err) {
+    toast(humanizeError(err), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '';
+    btn.append(el('span', { html: icon.share, style: 'width:18px;height:18px;' }), textoOriginal);
+  }
 }
 
 function nombreEquipo(m, prefix) {

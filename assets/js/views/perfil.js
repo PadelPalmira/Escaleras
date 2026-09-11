@@ -3,11 +3,13 @@ import { icon } from '../icons.js';
 import { navigate } from '../router.js';
 import { comprimirFotoPerfil } from '../avatar.js';
 import { generarQR } from '../vendor/qrencode.js';
+import { generarTarjetaRanking, generarTarjetaLiguilla, compartirTarjeta } from '../vendor/sharecard.js';
 import {
   getMyProfile, updateMyProfile, getMiHistorialPuntos, signOut,
   getMisMultas, getMisSuspensiones, getMisNotificaciones, marcarNotificacionLeida,
   getMiSituacionCategorias, getMiInteresFemenil, alternarInteresFemenil, getAjusteNum,
   subirFotoPerfil, borrarFotoPerfil, getWeekdayScheduleAll, getMisCashbacks,
+  getRankingCompleto, getEventoLiguillaActivo, getParejasLiguilla,
 } from '../api.js';
 import { NIVELES, esFemenil, recomendacionPorNivel, textoDia } from '../niveles.js';
 
@@ -192,6 +194,98 @@ function renderTarjetaCashback(c) {
   ]);
 }
 
+/* ============================================================
+   Compartir — accesos rápidos desde Perfil a las mismas imágenes
+   tipo historia que ya se pueden compartir desde Ranking y
+   Liguilla. No es contenido personal del jugador: es la misma
+   tabla/podio compartido, solo que aquí no hay una noche o pestaña
+   ya elegida, así que se manda a compartir la que le toca por su
+   propia categoría (o la más reciente con resultados, en Liguilla).
+   ============================================================ */
+function renderSeccionCompartir(profile) {
+  const wrap = el('div', { class: 'mt-4' });
+  wrap.appendChild(el('div', { class: 'section-title' }, 'Compartir'));
+  const card = el('div', { class: 'card stack gap-3' });
+
+  const botonCompartir = (texto) => el('button', {
+    class: 'btn btn-secondary', style: 'display:flex;align-items:center;justify-content:center;gap:8px;',
+  }, [el('span', { html: icon.share, style: 'width:18px;height:18px;' }), el('span', {}, texto)]);
+
+  const btnRanking = botonCompartir('Compartir ranking general');
+  btnRanking.addEventListener('click', () => compartirRankingDesdePerfil(profile, btnRanking));
+  card.appendChild(btnRanking);
+
+  const btnLiguilla = botonCompartir('Compartir resultados de Liguilla');
+  btnLiguilla.addEventListener('click', () => compartirLiguillaDesdePerfil(btnLiguilla));
+  card.appendChild(btnLiguilla);
+
+  wrap.appendChild(card);
+  return wrap;
+}
+
+async function compartirRankingDesdePerfil(profile, btn) {
+  const textoOriginal = btn.lastChild.textContent;
+  btn.disabled = true; btn.lastChild.textContent = 'Generando…';
+  try {
+    const { filas } = await getRankingCompleto();
+    if (!filas || filas.length === 0) { toast('Todavía no hay ranking para compartir.', 'info'); return; }
+    const tengoEnA = filas.some((f) => f.player_id === profile.id && f.category === 'A');
+    const tengoEnB = filas.some((f) => f.player_id === profile.id && f.category === 'B');
+    const cat = (!tengoEnA && tengoEnB) ? 'B' : 'A';
+    const dela = filas.filter((f) => f.category === cat).sort((a, b) => (a.rank || 999) - (b.rank || 999));
+    if (dela.length === 0) { toast('Todavía no hay ranking en esa categoría para compartir.', 'info'); return; }
+    const top = dela.slice(0, 8).map((f) => ({
+      rank: f.rank,
+      full_name: (f.profiles && f.profiles.full_name) || 'Jugador',
+      promedio: f.escaleras_counted > 0 ? Number(f.rolling_points) / Number(f.escaleras_counted) : 0,
+    }));
+    const canvas = await generarTarjetaRanking({ categoryLabel: cat === 'A' ? 'Categoría A' : 'Categoría B', filas: top });
+    await compartirTarjeta(canvas, {
+      archivo: `ranking-${cat}.png`,
+      titulo: 'Ranking General — Escaleras Padel Palmira',
+      texto: 'Ranking General',
+    });
+  } catch (err) {
+    toast(humanizeError(err), 'error');
+  } finally {
+    btn.disabled = false; btn.lastChild.textContent = textoOriginal;
+  }
+}
+
+async function compartirLiguillaDesdePerfil(btn) {
+  const textoOriginal = btn.lastChild.textContent;
+  btn.disabled = true; btn.lastChild.textContent = 'Buscando…';
+  try {
+    let evento = null; let parejas = null;
+    for (const tier of ['liguilla_a', 'ascenso_b']) {
+      let ev;
+      try { ev = await getEventoLiguillaActivo([tier]); } catch { ev = null; }
+      if (!ev || !['confirmed', 'in_progress', 'completed'].includes(ev.status)) continue;
+      const ps = await getParejasLiguilla(ev.id);
+      if (ps.some((p) => p.final_placement)) { evento = ev; parejas = ps; break; }
+    }
+    if (!evento) { toast('Todavía no hay resultados de Liguilla para compartir.', 'info'); return; }
+    const resultados = parejas
+      .filter((p) => p.final_placement)
+      .sort((a, b) => a.final_placement - b.final_placement)
+      .map((p) => ({ final_placement: p.final_placement, nombre1: p.player1?.full_name || '—', nombre2: p.player2?.full_name || '—' }));
+    const canvas = await generarTarjetaLiguilla({
+      tierLabel: evento.tier === 'liguilla_a' ? 'Liguilla · Categoría A' : 'Liguilla Categoría B',
+      eventDateLabel: evento.event_date ? formatFecha(evento.event_date) : '',
+      resultados,
+    });
+    await compartirTarjeta(canvas, {
+      archivo: `liguilla-${evento.tier}.png`,
+      titulo: 'Resultados de Liguilla — Escaleras Padel Palmira',
+      texto: 'Resultados de Liguilla',
+    });
+  } catch (err) {
+    toast(humanizeError(err), 'error');
+  } finally {
+    btn.disabled = false; btn.lastChild.textContent = textoOriginal;
+  }
+}
+
 async function renderSeccionCashbacks(profile) {
   let cashbacks;
   try { cashbacks = await getMisCashbacks(profile.id); } catch (err) { return null; }
@@ -364,6 +458,10 @@ export async function renderPerfil() {
   // Cashbacks (solo se muestra si tiene alguno, para no saturar a la mayoría)
   const seccionCashbacks = await renderSeccionCashbacks(profile);
   if (seccionCashbacks) wrap.appendChild(seccionCashbacks);
+
+  // Accesos rápidos para compartir el ranking/Liguilla en redes — siempre
+  // visibles, no dependen de que el jugador tenga nada propio que mostrar.
+  wrap.appendChild(renderSeccionCompartir(profile));
 
   // Multas (solo se muestra la sección si tiene alguna, para no saturar a la mayoría)
   if (multas && multas.length > 0) {

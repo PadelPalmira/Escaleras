@@ -986,6 +986,12 @@ export async function redimirTodosLosCashbacksDeJugador(playerId) {
   return (data && data[0]) || { redimidos: 0, monto_total: 0, omitidos_por_hoy: 0 };
 }
 
+export async function podioDeNoche(escaleraId) {
+  const { data, error } = await supabase.rpc('podio_de_noche', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return data || [];
+}
+
 export async function getMisNotificaciones(playerId, limite = 30) {
   const { data, error } = await supabase
     .from('notifications').select('*').eq('player_id', playerId)

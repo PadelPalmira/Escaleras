@@ -37,4 +37,7 @@ export const icon = {
   // cualquier tamaño, a diferencia de una cámara sola (que se confunde con
   // "tomar foto").
   qrcode: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v3M14 20h3M20 20v.01"/>'),
+  // Compartir: nodo central con dos ramas — el ícono estándar de "compartir"
+  // en iOS/Android, para que se reconozca de inmediato como tal.
+  share: svg('<circle cx="18" cy="5" r="2.4"/><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="19" r="2.4"/><path d="m8.1 10.8 7.8-4.2M8.1 13.2l7.8 4.2"/>'),
 };
