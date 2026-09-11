@@ -29,6 +29,19 @@ export async function renderAdmin() {
   wrap.appendChild(el('div', { class: 'h1 mb-2' }, 'Admin'));
   wrap.appendChild(el('p', { class: 'text-muted' }, 'Todo lo del club en un solo lugar.'));
 
+  // Botón grande y a la vista: es el que más se usa por noche (cada jugador
+  // que llega a cobrar un cashback), así que no se entierra entre las demás
+  // tarjetas del menú.
+  wrap.appendChild(el('button', {
+    class: 'card mt-4 card-tappable',
+    style: 'background:var(--gradient-brand-soft);border:1.5px solid var(--cyan);text-align:center;padding:20px;',
+    onclick: () => navigate('/admin/escanear-cashback'),
+  }, [
+    el('span', { html: icon.qrcode, style: 'width:36px;height:36px;color:var(--cyan);' }),
+    el('div', { style: 'font-weight:800;font-size:16px;margin-top:8px;' }, 'Escanear cashback'),
+    el('p', { class: 'text-tiny mt-1' }, 'Apunta la cámara al código del jugador y se marca usado solo.'),
+  ]));
+
   wrap.appendChild(menuCard({
     titulo: 'Noches del club',
     descripcion: 'Quién se anotó, comenzar la noche, capturar los marcadores y cerrarla.',

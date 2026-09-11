@@ -958,6 +958,34 @@ export async function getMisSuspensiones(playerId) {
   if (error) throw error;
   return data;
 }
+/* ============================================================
+   Cashbacks — cupones de descuento a los ganadores de cada noche
+   ============================================================ */
+
+export async function getMisCashbacks(playerId) {
+  const { data, error } = await supabase.rpc('mis_cashbacks', { p_player_id: playerId });
+  if (error) throw error;
+  return data || [];
+}
+/* Solo lectura, para que recepción vea de qué se trata antes de redimir
+   (por ejemplo si el escaneo falla y hay que buscarlo a mano). No usado por
+   el flujo de "escanear y listo" — ese llama directo a redimirCashbackPorToken. */
+export async function validarCashbackPorToken(token) {
+  const { data, error } = await supabase.rpc('validar_cashback_por_token', { p_token: token });
+  if (error) throw error;
+  return (data && data[0]) || null;
+}
+export async function redimirCashbackPorToken(token) {
+  const { data, error } = await supabase.rpc('redimir_cashback_por_token', { p_token: token });
+  if (error) throw error;
+  return (data && data[0]) || null;
+}
+export async function redimirTodosLosCashbacksDeJugador(playerId) {
+  const { data, error } = await supabase.rpc('redimir_todos_los_cashbacks_de_jugador', { p_player_id: playerId });
+  if (error) throw error;
+  return (data && data[0]) || { redimidos: 0, monto_total: 0, omitidos_por_hoy: 0 };
+}
+
 export async function getMisNotificaciones(playerId, limite = 30) {
   const { data, error } = await supabase
     .from('notifications').select('*').eq('player_id', playerId)

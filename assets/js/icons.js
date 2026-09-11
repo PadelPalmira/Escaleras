@@ -33,4 +33,8 @@ export const icon = {
   // cualquier tamaño — y con los iconos ya visibles, se notaba de más.
   racket: svg('<path d="M12 2.6c3 0 5.3 2.3 5.3 5.3v3.4c0 2.9-2.4 5.3-5.3 5.3s-5.3-2.4-5.3-5.3V7.9c0-3 2.3-5.3 5.3-5.3Z"/><path d="M12 16.6V21"/><path d="M10.2 21h3.6"/>'),
   whatsapp: svg('<path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3Z"/><path d="M8.3 8.7c.2-.6.5-.6.8-.6h.5c.2 0 .4 0 .5.4.2.5.6 1.6.7 1.7.1.1.1.3 0 .5-.1.2-.2.3-.3.4l-.4.5c-.1.2-.3.3-.1.6.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.3 2.4 1.5.3.1.5.1.7-.1l.6-.7c.2-.3.4-.2.6-.1l1.5.7c.2.1.3.2.4.3.1.2.1.9-.2 1.4-.3.5-1.4 1.1-2 1.1-.6 0-1.3 0-4.2-1.7-2.9-1.7-3.7-4.6-3.8-4.8-.1-.2-.9-1.4-.9-2.6 0-1.2.6-1.8.8-2Z"/>'),
+  // Código QR: tres esquinas de "buscador" + rejilla — se lee como QR a
+  // cualquier tamaño, a diferencia de una cámara sola (que se confunde con
+  // "tomar foto").
+  qrcode: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v3M14 20h3M20 20v.01"/>'),
 };

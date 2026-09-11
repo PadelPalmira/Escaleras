@@ -2,11 +2,12 @@ import { el, avatarContent, formatFecha, formatFechaHora, formatPuntos, toast, h
 import { icon } from '../icons.js';
 import { navigate } from '../router.js';
 import { comprimirFotoPerfil } from '../avatar.js';
+import { generarQR } from '../vendor/qrencode.js';
 import {
   getMyProfile, updateMyProfile, getMiHistorialPuntos, signOut,
   getMisMultas, getMisSuspensiones, getMisNotificaciones, marcarNotificacionLeida,
   getMiSituacionCategorias, getMiInteresFemenil, alternarInteresFemenil, getAjusteNum,
-  subirFotoPerfil, borrarFotoPerfil, getWeekdayScheduleAll,
+  subirFotoPerfil, borrarFotoPerfil, getWeekdayScheduleAll, getMisCashbacks,
 } from '../api.js';
 import { NIVELES, esFemenil, recomendacionPorNivel, textoDia } from '../niveles.js';
 
@@ -138,6 +139,98 @@ async function renderTarjetaFemenil(profile) {
   return card;
 }
 
+/* Dibuja un QR (ver assets/js/vendor/qrencode.js, generador propio sin
+   dependencias) dentro de un <canvas>, con su zona de silencio blanca
+   alrededor — sin eso una cámara de celular no lo detecta bien de cerca. */
+function dibujarQR(texto, tamanoPx = 176) {
+  const { size, matrix } = generarQR(texto);
+  const canvas = el('canvas', { width: tamanoPx, height: tamanoPx, style: `width:${tamanoPx}px;height:${tamanoPx}px;` });
+  const ctx = canvas.getContext('2d');
+  const cuadros = size + 8; // +4 módulos de zona de silencio por lado
+  const modulo = tamanoPx / cuadros;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, tamanoPx, tamanoPx);
+  ctx.fillStyle = '#000';
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      if (matrix[r][c]) ctx.fillRect((c + 4) * modulo, (r + 4) * modulo, Math.ceil(modulo), Math.ceil(modulo));
+    }
+  }
+  return canvas;
+}
+
+const CASHBACK_STATUS = {
+  disponible: { text: 'Disponible', cls: 'badge-success' },
+  no_disponible_hoy: { text: 'Disponible pronto', cls: 'badge-warning' },
+  vencido: { text: 'Vencido', cls: 'badge-neutral' },
+  usado: { text: 'Usado', cls: 'badge-neutral' },
+};
+function diasRestantes(expiresAt) {
+  const ms = new Date(expiresAt).getTime() - ahora().getTime();
+  return Math.max(0, Math.ceil(ms / (1000 * 60 * 60 * 24)));
+}
+
+function renderTarjetaCashback(c) {
+  const st = CASHBACK_STATUS[c.status] || { text: c.status, cls: 'badge-neutral' };
+  const puedeMostrarQR = c.status === 'disponible' || c.status === 'no_disponible_hoy';
+  return el('div', { class: 'card mt-2' }, [
+    el('div', { class: 'row-between' }, [
+      el('div', {}, [
+        el('div', { style: 'font-weight:800;font-size:20px;' }, `$${Number(c.amount_mxn).toLocaleString('es-MX')} MXN`),
+        el('div', { class: 'text-tiny mt-1' }, `Ganado el ${formatFecha(c.earned_at.slice(0, 10))} — Escalera del ${formatFecha(c.session_date)}`),
+      ]),
+      el('span', { class: `badge ${st.cls}` }, st.text),
+    ]),
+    c.status === 'disponible' ? el('p', { class: 'text-tiny mt-2' }, `Vence en ${diasRestantes(c.expires_at)} día(s) — ${formatFecha(c.expires_at.slice(0, 10))}.`) : null,
+    c.status === 'no_disponible_hoy' ? el('p', { class: 'text-tiny mt-2' }, 'Lo ganaste hoy — puedes usarlo a partir de tu próxima visita, no el mismo día.') : null,
+    c.status === 'usado' ? el('p', { class: 'text-tiny mt-2' }, `Usado el ${formatFechaHora(c.used_at)}`) : null,
+    c.status === 'vencido' ? el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' }, `Venció el ${formatFecha(c.expires_at.slice(0, 10))} sin usarse.`) : null,
+    puedeMostrarQR ? el('div', { class: 'mt-3', style: 'text-align:center;' }, [
+      dibujarQR(`CB1:${c.redeem_token}`, 160),
+      el('p', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' }, 'Enséñale este código a recepción para usarlo.'),
+    ]) : null,
+  ]);
+}
+
+async function renderSeccionCashbacks(profile) {
+  let cashbacks;
+  try { cashbacks = await getMisCashbacks(profile.id); } catch (err) { return null; }
+  if (!cashbacks || cashbacks.length === 0) return null;
+
+  const wrap = el('div');
+  wrap.appendChild(el('div', { class: 'section-title' }, 'Cashbacks'));
+  wrap.appendChild(el('div', { class: 'card', style: 'background:var(--surface-2);' }, [
+    el('p', { class: 'text-tiny' }, 'Válidos para Escaleras y reservas de cancha. No aplican a clases, consumos u otros servicios, ni a reservas por Playtomic. Se ganan entre los primeros lugares de la noche y se pueden ir acumulando — no se pueden usar el mismo día que se ganan.'),
+  ]));
+
+  const vigentes = cashbacks.filter((c) => c.status === 'disponible' || c.status === 'no_disponible_hoy');
+  const usados = cashbacks.filter((c) => c.status === 'usado');
+  const vencidos = cashbacks.filter((c) => c.status === 'vencido');
+
+  if (vigentes.filter((c) => c.status === 'disponible').length >= 2) {
+    wrap.appendChild(el('div', { class: 'card mt-3', style: 'text-align:center;border:1.5px dashed var(--cyan);' }, [
+      el('div', { style: 'font-weight:700;' }, 'Redimirlos todos de un solo escaneo'),
+      el('p', { class: 'text-tiny mt-1' }, 'Enséñale este código a recepción para usar de un jalón todos tus cashbacks vigentes esa noche.'),
+      el('div', { class: 'mt-2' }, dibujarQR(`CBALL:${profile.id}`, 160)),
+    ]));
+  }
+
+  if (vigentes.length > 0) {
+    wrap.appendChild(el('div', { class: 'text-tiny mt-3', style: 'font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);' }, 'Vigentes'));
+    vigentes.forEach((c) => wrap.appendChild(renderTarjetaCashback(c)));
+  }
+  if (usados.length > 0) {
+    wrap.appendChild(el('div', { class: 'text-tiny mt-3', style: 'font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);' }, 'Usados'));
+    usados.forEach((c) => wrap.appendChild(renderTarjetaCashback(c)));
+  }
+  if (vencidos.length > 0) {
+    wrap.appendChild(el('div', { class: 'text-tiny mt-3', style: 'font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);' }, 'Vencidos'));
+    vencidos.forEach((c) => wrap.appendChild(renderTarjetaCashback(c)));
+  }
+
+  return wrap;
+}
+
 export async function renderPerfil() {
   const profile = await getMyProfile();
   if (!profile) return el('div', { class: 'empty-state' }, 'No se pudo cargar tu perfil.');
@@ -267,6 +360,10 @@ export async function renderPerfil() {
     ]),
     saveBtn,
   ]));
+
+  // Cashbacks (solo se muestra si tiene alguno, para no saturar a la mayoría)
+  const seccionCashbacks = await renderSeccionCashbacks(profile);
+  if (seccionCashbacks) wrap.appendChild(seccionCashbacks);
 
   // Multas (solo se muestra la sección si tiene alguna, para no saturar a la mayoría)
   if (multas && multas.length > 0) {
