@@ -4,6 +4,7 @@ import {
   getRegistrosActivosDeJugador, asignarSustituto, marcarNoShow, cancelarRegistro,
   aplicarMulta, marcarMultaEstado, getMisMultas,
   aplicarSuspension, levantarSuspension, getMisSuspensiones,
+  getMisCashbacks, redimirCashbackPorToken, redimirTodosLosCashbacksDeJugador,
 } from '../api.js';
 
 const FORMAT_LABEL = { individual: 'Individual', parejas: 'Parejas Fijas', retas_abiertas: 'Retas Abiertas' };
@@ -13,6 +14,12 @@ const REG_STATUS = {
   substitute: { text: 'Sustituto', cls: 'badge-success' },
 };
 const FINE_STATUS = { pending: { text: 'Pendiente', cls: 'badge-warning' }, paid: { text: 'Pagada', cls: 'badge-success' }, waived: { text: 'Condonada', cls: 'badge-neutral' } };
+const CASHBACK_STATUS = {
+  disponible: { text: 'Disponible', cls: 'badge-success' },
+  no_disponible_hoy: { text: 'Disponible pronto', cls: 'badge-warning' },
+  vencido: { text: 'Vencido', cls: 'badge-neutral' },
+  usado: { text: 'Usado', cls: 'badge-neutral' },
+};
 
 export async function renderAdminJugadores() {
   const profile = await getMyProfile();
@@ -101,6 +108,58 @@ async function pintarFicha(wrap, jugador) {
       }
     });
     wrap.appendChild(list);
+  }
+
+  // ---- Cashbacks ----
+  // Alternativa de consulta/gestión manual a escanear su QR — para cuando
+  // el jugador no trae el celular a la mano, o para revisar/redimir desde
+  // aquí directamente.
+  let cashbacks = [];
+  try { cashbacks = await getMisCashbacks(jugador.id); } catch (err) { cashbacks = []; }
+  wrap.appendChild(el('div', { class: 'section-title mt-6' }, 'Cashbacks'));
+  if (cashbacks.length === 0) {
+    wrap.appendChild(el('div', { class: 'card' }, el('p', { class: 'text-muted' }, 'Sin cashbacks.')));
+  } else {
+    const disponibles = cashbacks.filter((c) => c.status === 'disponible');
+    const list = el('div', { class: 'card' });
+    cashbacks.forEach((c, i) => {
+      if (i > 0) list.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
+      const st = CASHBACK_STATUS[c.status] || { text: c.status, cls: 'badge-neutral' };
+      list.appendChild(el('div', { class: 'row-between' }, [
+        el('div', {}, [
+          el('div', { style: 'font-weight:700;' }, `$${Number(c.amount_mxn)} MXN — ${c.place}º lugar`),
+          el('div', { class: 'text-tiny' }, `Ganado en la noche del ${formatFecha(c.session_date)}`),
+        ]),
+        el('span', { class: `badge ${st.cls}` }, st.text),
+      ]));
+      if (c.status === 'disponible') {
+        list.appendChild(el('button', {
+          class: 'btn btn-secondary btn-sm mt-2',
+          onclick: async (e) => {
+            e.target.disabled = true; e.target.textContent = 'Redimiendo…';
+            try { await redimirCashbackPorToken(c.redeem_token); toast('Cashback redimido — no olvides marcarlo también en Loyverse.', 'success', 5000); refresh(); }
+            catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; e.target.textContent = 'Redimir'; }
+          },
+        }, 'Redimir'));
+      }
+    });
+    wrap.appendChild(list);
+
+    if (disponibles.length >= 2) {
+      wrap.appendChild(el('button', {
+        class: 'btn btn-secondary mt-2',
+        onclick: async (e) => {
+          e.target.disabled = true; e.target.textContent = 'Redimiendo…';
+          try {
+            const r = await redimirTodosLosCashbacksDeJugador(jugador.id);
+            toast(`Redimidos ${r.redimidos} por $${Number(r.monto_total)} MXN`
+              + (r.omitidos_por_hoy > 0 ? ` — ${r.omitidos_por_hoy} quedaron pendientes por ser de hoy.` : '')
+              + ' No olvides marcarlo también en Loyverse.', 'success', 6000);
+            refresh();
+          } catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; e.target.textContent = 'Redimir todos los disponibles'; }
+        },
+      }, 'Redimir todos los disponibles'));
+    }
   }
 
   // ---- Multas ----

@@ -992,6 +992,18 @@ export async function podioDeNoche(escaleraId) {
   return data || [];
 }
 
+export async function getCampeonesHistoricos() {
+  const { data, error } = await supabase.rpc('campeones_historicos');
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getReporteCashbacksMes(monthKey) {
+  const { data, error } = await supabase.rpc('reporte_cashbacks_mes', { p_month_key: monthKey });
+  if (error) throw error;
+  return data || [];
+}
+
 export async function getMisNotificaciones(playerId, limite = 30) {
   const { data, error } = await supabase
     .from('notifications').select('*').eq('player_id', playerId)

@@ -4,6 +4,7 @@ import {
   getSystemSettingsAll, updateSystemSetting, getWeekdayScheduleAll, updateWeekdaySchedule,
   crearWeekdaySchedule, borrarWeekdaySchedule,
   getStaff, setProfileRole, buscarJugadores, generarEscalerasSemana, getProximasEscaleras,
+  getReporteCashbacksMes,
 } from '../api.js';
 
 const WEEKDAY_LABEL = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', domingo: 'Domingo' };
@@ -45,7 +46,67 @@ export async function renderMaestro() {
   wrap.appendChild(staffBox);
   await pintarStaff(staffBox);
 
+  wrap.appendChild(el('div', { class: 'section-title' }, 'Reporte de Cashbacks'));
+  wrap.appendChild(el('p', { class: 'text-tiny mb-2' },
+    'Cuánto se redimió y quién, por mes — para comparar contra lo marcado en Loyverse.'));
+  const cashbackBox = el('div');
+  wrap.appendChild(cashbackBox);
+  await pintarReporteCashbacks(cashbackBox);
+
   return wrap;
+}
+
+function mesActualKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+async function pintarReporteCashbacks(box) {
+  const monthInput = el('input', { class: 'input', type: 'month', value: mesActualKey(), style: 'max-width:220px;' });
+  const resultBox = el('div', { class: 'mt-3' });
+
+  async function cargar() {
+    resultBox.innerHTML = '<p class="text-tiny">Cargando…</p>';
+    let filas = [];
+    try {
+      filas = await getReporteCashbacksMes(monthInput.value);
+    } catch (err) {
+      resultBox.innerHTML = '';
+      resultBox.appendChild(el('p', { class: 'text-tiny', style: 'color:var(--danger);' }, humanizeError(err)));
+      return;
+    }
+    resultBox.innerHTML = '';
+    if (filas.length === 0) {
+      resultBox.appendChild(el('p', { class: 'text-muted' }, 'Nadie redimió cashbacks ese mes.'));
+      return;
+    }
+    const list = el('div', { class: 'card' });
+    let totalGeneral = 0;
+    filas.forEach((f, i) => {
+      if (i > 0) list.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
+      totalGeneral += Number(f.total_mxn);
+      list.appendChild(el('div', { class: 'row-between' }, [
+        el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
+          el('span', { class: 'avatar-mini' }, avatarContent(f)),
+          el('div', {}, [
+            el('div', { style: 'font-weight:600;font-size:14px;' }, f.full_name || '(sin nombre)'),
+            el('div', { class: 'text-tiny' }, `${f.usados} redimido(s)`),
+          ]),
+        ]),
+        el('div', { style: 'font-weight:800;' }, `$${Number(f.total_mxn).toLocaleString('es-MX')}`),
+      ]));
+    });
+    resultBox.appendChild(list);
+    resultBox.appendChild(el('p', { class: 'text-tiny mt-2', style: 'text-align:right;font-weight:700;' },
+      `Total del mes: $${totalGeneral.toLocaleString('es-MX')} MXN`));
+    resultBox.appendChild(el('p', { class: 'text-tiny mt-3', style: 'color:var(--text-tertiary);' },
+      'Compáralo contra lo que se marcó como cashback en Loyverse ese mismo mes — si no cuadra, a alguien se le olvidó marcarlo (o alguien lo redimió sin escanear el QR).'));
+  }
+
+  monthInput.addEventListener('change', cargar);
+  box.appendChild(el('div', { class: 'field' }, [el('label', {}, 'Mes'), monthInput]));
+  box.appendChild(resultBox);
+  await cargar();
 }
 
 async function pintarHorarios(box) {

@@ -5,6 +5,7 @@ import {
   getMiCalificacionLiguilla, getCalificadosConfirmados, getParejasLiguilla, getMiParejaLiguilla,
   getPickActualDraft, getPartidosLiguilla, responderCalificacionLiguilla, hacerPickDraft, responderPickDraft,
   autoprogramarLiguillaMes, getEventoLiguillaDelMes, getLiguillaTablaVivo, getMiCarreraLiguilla,
+  getCampeonesHistoricos,
 } from '../api.js';
 import { generarTarjetaLiguilla, compartirTarjeta } from '../vendor/sharecard.js';
 
@@ -53,6 +54,9 @@ export async function renderLiguilla() {
       el('div', { class: 'emoji' }, '🏆'),
       el('p', {}, 'Todavía no calificas a ninguna Liguilla. Se abre a los mejores del ranking en vivo de cada categoría — A y B por separado — y se recalcula con cada noche que juegas.'),
     ]));
+    // Los Campeones Históricos son de todo el club, no de quien calificó
+    // este mes — se muestran aquí igual, aunque el jugador no esté adentro.
+    wrap.appendChild(await renderCampeonesHistoricos());
     return wrap;
   }
 
@@ -91,6 +95,82 @@ export async function renderLiguilla() {
 
   wrap.appendChild(el('p', { class: 'text-tiny mt-6', style: 'text-align:center;' }, 'Esta pantalla no se actualiza sola — usa "Actualizar" arriba para ver movimientos nuevos.'));
 
+  wrap.appendChild(await renderCampeonesHistoricos());
+
+  return wrap;
+}
+
+/* ============================================================
+   Campeones Históricos — "placa" por cada edición de Liguilla ya
+   terminada, con sub-pestañas A/B. Es del club entero (no depende
+   de si el jugador calificó este mes), así que se pinta siempre,
+   tanto si el jugador todavía no califica a ninguna Liguilla como
+   si sí.
+   ============================================================ */
+const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+function mesYAnio(fechaISO) {
+  const d = new Date(fechaISO + 'T00:00:00Z');
+  const mes = MESES_ES[d.getUTCMonth()];
+  return `${mes.charAt(0).toUpperCase()}${mes.slice(1)} ${d.getUTCFullYear()}`;
+}
+
+async function renderCampeonesHistoricos() {
+  const wrap = el('div', { class: 'mt-6' });
+  wrap.appendChild(el('div', { class: 'h2 mb-1' }, [
+    el('span', { html: icon.trophy, style: 'width:20px;height:20px;vertical-align:-3px;margin-right:7px;color:var(--cyan);' }),
+    'Campeones Históricos',
+  ]));
+
+  let campeones = [];
+  try { campeones = await getCampeonesHistoricos(); } catch (err) {
+    console.error('No se pudieron cargar los Campeones Históricos:', err);
+    wrap.appendChild(el('p', { class: 'text-muted mt-2' }, 'No se pudo cargar el historial de campeones.'));
+    return wrap;
+  }
+
+  if (campeones.length === 0) {
+    wrap.appendChild(el('p', { class: 'text-muted mt-2' }, 'Todavía no hay ninguna edición de Liguilla terminada.'));
+    return wrap;
+  }
+
+  let tierActivo = campeones.some((c) => c.tier === 'liguilla_a') ? 'liguilla_a' : 'ascenso_b';
+  const tabsWrap = el('div', { class: 'tabs mt-2' });
+  const listWrap = el('div');
+
+  function draw() {
+    tabsWrap.innerHTML = '';
+    [['liguilla_a', 'Categoría A'], ['ascenso_b', 'Categoría B']].forEach(([key, label]) => {
+      tabsWrap.appendChild(el('button', {
+        class: `tab-chip ${tierActivo === key ? 'active' : ''}`,
+        onclick: () => { tierActivo = key; draw(); },
+      }, label));
+    });
+
+    listWrap.innerHTML = '';
+    const filtrados = campeones
+      .filter((c) => c.tier === tierActivo)
+      .sort((a, b) => b.event_date.localeCompare(a.event_date));
+    if (filtrados.length === 0) {
+      listWrap.appendChild(el('p', { class: 'text-muted mt-3' }, 'Todavía no hay campeones en esta categoría.'));
+      return;
+    }
+    filtrados.forEach((c) => {
+      listWrap.appendChild(el('div', {
+        class: 'card mt-3',
+        style: 'text-align:center;padding:22px;border:1.5px solid var(--cyan);background:var(--gradient-brand-soft);',
+      }, [
+        el('span', { html: icon.trophy, style: 'width:30px;height:30px;color:var(--cyan);' }),
+        el('div', { class: 'text-tiny mt-2', style: 'text-transform:uppercase;letter-spacing:0.06em;color:var(--text-tertiary);' },
+          mesYAnio(c.event_date)),
+        el('div', { style: 'font-weight:800;font-size:17px;margin-top:6px;' },
+          `${c.jugador1_nombre || '—'} / ${c.jugador2_nombre || '—'}`),
+      ]));
+    });
+  }
+
+  draw();
+  wrap.appendChild(tabsWrap);
+  wrap.appendChild(listWrap);
   return wrap;
 }
 
