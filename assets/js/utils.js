@@ -236,8 +236,15 @@ export function confirmSheet({ title, body, confirmLabel = 'Confirmar', danger =
 
 export function humanizeError(err) {
   if (!err) return 'Algo salió mal. Intenta de nuevo.';
-  const msg = err.message || String(err);
+  const msg = (err.message || String(err)).trim();
   // Los mensajes de nuestras funciones Postgres ya están en español claro —
-  // Supabase los entrega tal cual dentro de err.message.
-  return msg.replace(/^.*?:\s*/, '').trim() || msg;
+  // Supabase los entrega tal cual dentro de err.message. OJO: antes esta
+  // función recortaba todo lo que viniera antes de los PRIMEROS dos puntos,
+  // asumiendo que siempre era un prefijo técnico — pero varios mensajes
+  // reales usan los dos puntos como puntuación normal a media frase (p.ej.
+  // "Ventana de corrección cerrada: la escalera ya comenzó..."), y ese
+  // recorte se comía justo la parte que explicaba el motivo. Ahora solo se
+  // quita un prefijo genérico tipo "Error: " que a veces antepone el motor
+  // de JS — el resto del mensaje se conserva completo, dos puntos incluidos.
+  return msg.replace(/^Error:\s*/i, '').trim() || 'Algo salió mal. Intenta de nuevo.';
 }

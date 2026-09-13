@@ -1,4 +1,4 @@
-import { el, todayISO, formatFecha, formatHora, avatarContent } from '../utils.js';
+import { el, todayISO, formatFecha, formatHora, avatarContent, toast, humanizeError } from '../utils.js';
 import { icon } from '../icons.js';
 import {
   getMyProfile, getMiSituacionCategorias, getMisRegistros, tiersElegibles,
@@ -55,8 +55,13 @@ async function renderInicioJugador(profile) {
 
   const hoy = todayISO();
   const registroHoy = registros.find((r) => r.escaleras && r.escaleras.session_date === hoy && ['confirmed', 'substitute', 'waitlist'].includes(r.status));
+  // Solo compromisos vigentes: un registro del que ya te diste de baja, que
+  // declinaste, o que ya no está activo no es una "próxima sesión" — dejarlo
+  // aquí lo hace ver como un pendiente real cuando ya no lo es, y hasta puede
+  // sacar de la lista (por el tope de 5) a una sesión que sí sigue en pie.
   const proximosRegistros = registros
-    .filter((r) => r.escaleras && r.escaleras.session_date >= hoy)
+    .filter((r) => r.escaleras && r.escaleras.session_date >= hoy
+      && ['confirmed', 'substitute', 'waitlist'].includes(r.status))
     .sort((a, b) => a.escaleras.session_date.localeCompare(b.escaleras.session_date));
 
   const wrap = el('div');
@@ -88,7 +93,7 @@ async function renderInicioJugador(profile) {
             await marcarNotificacionLeida(n.id);
             card.remove();
             window.dispatchEvent(new CustomEvent('avisos-cambiaron'));
-          } catch { e.target.disabled = false; }
+          } catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
         },
       }, 'Enterado'));
       wrap.appendChild(card);

@@ -598,6 +598,31 @@ function renderCuantosVan(esc, confirmados, cupo, espera, yaArranco) {
 function renderComenzar(esc, confirmados, cupo, faltan, completo, refresh) {
   const box = el('div', { class: 'mt-4' });
 
+  // Si ya pasó la fecha y nadie le dio "Comenzar" ese día, el backend ya no
+  // deja arrancarla (pase lo que pase con el cupo) — antes la pantalla
+  // seguía ofreciendo "Comenzar escalera" como si nada, y encima cuando el
+  // cupo estaba completo ni siquiera había un botón para cancelarla: había
+  // que ir quitando jugadores del roster uno por uno para desatorarlo. Ahora
+  // se explica de una vez y se ofrece cancelar, sin importar si se llenó o no.
+  if (esc.session_date < todayISO()) {
+    box.appendChild(el('div', { class: 'aviso aviso-danger' }, [
+      el('strong', {}, 'Esta noche ya pasó sin arrancar. '),
+      completo
+        ? 'El cupo se completó pero nadie le dio clic a "Comenzar" ese día — ya no se puede arrancar. Cancélala para liberar a todos sin penalización.'
+        : 'Nunca se completó el cupo y nadie la organizó a tiempo. Cancélala para liberar a todos sin penalización.',
+    ]));
+    box.appendChild(el('button', { class: 'btn btn-danger mt-3', onclick: async () => {
+      const motivo = await pedirMotivoCancelacion(confirmados, cupo);
+      if (motivo === null) return;
+      try {
+        await cancelarEscaleraAdmin(esc.id, motivo);
+        toast('Noche cancelada. Ya se les avisó a todos.', 'success');
+        refresh();
+      } catch (err) { toast(humanizeError(err), 'error'); }
+    } }, 'Cancelar la noche'));
+    return box;
+  }
+
   if (completo) {
     box.appendChild(el('div', { class: 'aviso aviso-ok' }, [
       el('strong', {}, 'Ya están todos. '),
@@ -816,7 +841,7 @@ function abrirCambioEnCancha(esc, ronda, refresh) {
           onclick: () => { sel.entra = j; actualizarResumen(); },
         }, [
           el('span', { class: 'avatar-mini' }, avatarContent(j)),
-          el('span', {}, j.full_name || '(sin nombre)'),
+          el('span', {}, `${j.full_name || '(sin nombre)'}${j.status !== 'active' ? '  ·  ' + (j.status === 'suspended' ? 'Suspendido' : 'Inactivo') : ''}`),
         ]));
       });
       if (!lista.children.length) lista.appendChild(el('p', { class: 'text-tiny mt-2' }, 'Nadie con ese nombre.'));
@@ -879,10 +904,20 @@ function renderRoster(esc, ws, registros, confirmados, enEspera, cupo, refresh) 
           catch (err) { toast(humanizeError(err), 'error'); }
         } }, 'No vino'),
         el('button', { class: 'btn btn-danger btn-sm', onclick: async () => {
-          const ok = await confirmSheet({ title: '¿Quitarlo de esta noche?', body: 'Se libera su lugar y, si hay lista de espera, entra el siguiente.', confirmLabel: 'Sí, quitar', danger: true });
+          const ok = await confirmSheet({
+            title: '¿Quitarlo de esta noche?',
+            body: 'Se libera su lugar y, si hay lista de espera, entra el siguiente. Si faltan pocas horas para el evento y nadie cubre su lugar, se le aplica la misma penalización de puntos que si él mismo se diera de baja tarde.',
+            confirmLabel: 'Sí, quitar', danger: true,
+          });
           if (!ok) return;
-          try { await cancelarRegistro(r.id); toast('Listo, ya no está en la lista.', 'success'); refresh(); }
-          catch (err) { toast(humanizeError(err), 'error'); }
+          try {
+            // El mensaje real de cancelar_registro dice si hubo penalización
+            // o no — mostrar siempre un "Listo" fijo escondía que a veces sí
+            // se le descuentan puntos al jugador sin que el admin se entere.
+            const res = await cancelarRegistro(r.id);
+            toast((res && res.mensaje) || 'Listo, ya no está en la lista.', res && res.penalizado ? 'error' : 'success', 6000);
+            refresh();
+          } catch (err) { toast(humanizeError(err), 'error'); }
         } }, 'Quitar'),
       ]));
     }
@@ -962,7 +997,7 @@ function abrirAgregarJugador(esc, ws, refresh) {
       }, [
         el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
           el('span', { class: 'avatar-mini' }, avatarContent(p)),
-          el('span', {}, p.full_name || '(sin nombre)'),
+          el('span', {}, `${p.full_name || '(sin nombre)'}${p.status !== 'active' ? '  ·  ' + (p.status === 'suspended' ? 'Suspendido' : 'Inactivo') : ''}`),
         ]),
       ])));
     }, 250);

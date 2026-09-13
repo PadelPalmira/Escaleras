@@ -1,7 +1,7 @@
 import { el, todayISO, formatFecha, formatFechaHora, toast, humanizeError, openSheet, confirmSheet, avatarContent, chipJugador } from '../utils.js';
 import {
   getMyProfile, esAdminOMaestro, buscarJugadores,
-  getRegistrosActivosDeJugador, asignarSustituto, marcarNoShow, cancelarRegistro,
+  getRegistrosActivosDeJugador, asignarSustituto, asignarSustitutoAdmin, marcarNoShow, cancelarRegistro,
   aplicarMulta, marcarMultaEstado, getMisMultas,
   aplicarSuspension, levantarSuspension, getMisSuspensiones,
   getMisCashbacks, redimirCashbackPorToken, redimirTodosLosCashbacksDeJugador,
@@ -92,17 +92,29 @@ async function pintarFicha(wrap, jugador) {
         el('span', { class: `badge ${st.cls}` }, st.text),
       ]));
       if (['confirmed', 'substitute'].includes(r.status)) {
+        const formato = r.escaleras.weekday_schedule ? r.escaleras.weekday_schedule.format : null;
         list.appendChild(el('div', { class: 'btn-row mt-2' }, [
-          el('button', { class: 'btn btn-secondary btn-sm', onclick: () => abrirSustituto(r, jugador, refresh) }, 'Sustituto'),
+          el('button', { class: 'btn btn-secondary btn-sm', onclick: () => abrirSustituto(r, jugador, formato, refresh) }, 'Sustituto'),
           el('button', { class: 'btn btn-secondary btn-sm', onclick: async () => {
             const ok = await confirmSheet({ title: '¿Marcar no-show?', confirmLabel: 'Sí, marcar', danger: true });
             if (!ok) return;
             try { await marcarNoShow(r.id); toast('Marcado como no-show.', 'success'); refresh(); } catch (err) { toast(humanizeError(err), 'error'); }
           } }, 'No-show'),
           el('button', { class: 'btn btn-danger btn-sm', onclick: async () => {
-            const ok = await confirmSheet({ title: '¿Cancelar este registro?', confirmLabel: 'Sí, cancelar', danger: true });
+            const ok = await confirmSheet({
+              title: '¿Cancelar este registro?',
+              body: 'Si faltan pocas horas para el evento y nadie cubre su lugar, se le aplica la misma penalización de puntos que si él mismo se diera de baja tarde.',
+              confirmLabel: 'Sí, cancelar', danger: true,
+            });
             if (!ok) return;
-            try { await cancelarRegistro(r.id); toast('Registro cancelado.', 'success'); refresh(); } catch (err) { toast(humanizeError(err), 'error'); }
+            try {
+              // El "mensaje" real que regresa cancelar_registro dice si hubo
+              // penalización o no — un "Registro cancelado" fijo escondía que
+              // a veces sí se le descuentan puntos, sin que el admin lo supiera.
+              const res = await cancelarRegistro(r.id);
+              toast((res && res.mensaje) || 'Registro cancelado.', res && res.penalizado ? 'error' : 'success', 6000);
+              refresh();
+            } catch (err) { toast(humanizeError(err), 'error'); }
           } }, 'Cancelar'),
         ]));
       }
@@ -223,20 +235,34 @@ async function pintarFicha(wrap, jugador) {
   }
 }
 
-async function abrirSustituto(registro, jugador, onChange) {
+async function abrirSustituto(registro, jugador, formato, onChange) {
   const content = el('div');
   content.appendChild(el('div', { class: 'sheet-title' }, 'Asignar sustituto'));
   let esCoach = false;
-  const infoTxt = el('p', { class: 'text-muted mb-3' }, 'El sustituto recibe 34% de los puntos ganados; el ausente conserva 66%.');
+  // En Parejas Fijas NUNCA hay reparto de puntos por sustituto — se cae la
+  // pareja completa, igual que si lo hiciera el propio jugador. Antes esta
+  // pantalla siempre repartía 34%/66% sin importar el formato, mientras que
+  // "Noches del club" para la misma escalera de Parejas Fijas obligaba al
+  // modo "emergencia, sin reparto": la misma acción daba resultados
+  // distintos según desde dónde se hiciera. Ahora las dos pantallas siguen
+  // la misma regla.
+  const esParejas = formato === 'parejas';
+  const infoTxt = el('p', { class: 'text-muted mb-3' },
+    esParejas
+      ? 'En Parejas Fijas no hay reparto de puntos: es una autorización de emergencia de recepción y el sustituto se queda con el 100% de lo que gane.'
+      : 'El sustituto recibe 34% de los puntos ganados; el ausente conserva 66%.');
   content.appendChild(infoTxt);
-  const coachToggle = el('button', { class: 'chip-btn mb-3' }, '☐ Es un coach del club cubriendo una emergencia');
-  coachToggle.addEventListener('click', () => {
-    esCoach = !esCoach;
-    coachToggle.classList.toggle('selected', esCoach);
-    coachToggle.textContent = esCoach ? '☑ Es un coach del club cubriendo una emergencia' : '☐ Es un coach del club cubriendo una emergencia';
-    infoTxt.textContent = esCoach ? 'El coach no gana puntos; el ausente recibe la penalización completa por tiempo.' : 'El sustituto recibe 34% de los puntos ganados; el ausente conserva 66%.';
-  });
-  content.appendChild(coachToggle);
+  let coachToggle = null;
+  if (!esParejas) {
+    coachToggle = el('button', { class: 'chip-btn mb-3' }, '☐ Es un coach del club cubriendo una emergencia');
+    coachToggle.addEventListener('click', () => {
+      esCoach = !esCoach;
+      coachToggle.classList.toggle('selected', esCoach);
+      coachToggle.textContent = esCoach ? '☑ Es un coach del club cubriendo una emergencia' : '☐ Es un coach del club cubriendo una emergencia';
+      infoTxt.textContent = esCoach ? 'El coach no gana puntos; el ausente recibe la penalización completa por tiempo.' : 'El sustituto recibe 34% de los puntos ganados; el ausente conserva 66%.';
+    });
+    content.appendChild(coachToggle);
+  }
   const search = el('input', { class: 'input mb-3', type: 'text', placeholder: 'Buscar jugador…' });
   const list = el('div', { class: 'stack gap-2', style: 'max-height:36vh;overflow-y:auto;' });
   async function draw(filtro = '') {
@@ -245,7 +271,11 @@ async function abrirSustituto(registro, jugador, onChange) {
     list.innerHTML = '';
     jugadores.filter((j) => j.id !== jugador.id).forEach((j) => {
       list.appendChild(chipJugador(j, async () => {
-        try { await asignarSustituto(registro.id, j.id, esCoach); toast(`${j.full_name} jugará en su lugar.`, 'success'); handle.close(); onChange(); }
+        try {
+          if (esParejas) await asignarSustitutoAdmin(registro.id, j.id, 'Emergencia — ficha de jugador');
+          else await asignarSustituto(registro.id, j.id, esCoach);
+          toast(`${j.full_name} jugará en su lugar.`, 'success'); handle.close(); onChange();
+        }
         catch (err) { toast(humanizeError(err), 'error'); }
       }));
     });
@@ -294,6 +324,16 @@ function abrirSuspension(jugador, onChange) {
   const btn = el('button', { class: 'btn btn-danger mt-2' }, 'Aplicar suspensión');
   btn.addEventListener('click', async () => {
     if (!start.value) { errBox.textContent = 'La fecha de inicio es obligatoria.'; errBox.style.display = 'block'; return; }
+    // Sin este chequeo, una fecha "Hasta" anterior a "Desde" se guardaba
+    // igual sin ningún aviso, y la ficha del jugador la mostraba de
+    // inmediato como "Terminada" — como si la suspensión nunca se hubiera
+    // aplicado, sin explicar por qué.
+    if (end.value && end.value < start.value) {
+      errBox.textContent = 'La fecha "Hasta" no puede ser anterior a "Desde".';
+      errBox.style.display = 'block';
+      return;
+    }
+    errBox.style.display = 'none';
     btn.disabled = true; btn.textContent = 'Aplicando…';
     try { await aplicarSuspension(jugador.id, start.value, end.value || null, reason.value.trim() || null); jugador.status = 'suspended'; toast('Suspensión aplicada.', 'success'); handle.close(); onChange(); }
     catch (err) { errBox.textContent = humanizeError(err); errBox.style.display = 'block'; btn.disabled = false; btn.textContent = 'Aplicar suspensión'; }

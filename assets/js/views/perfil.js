@@ -1,4 +1,4 @@
-import { el, avatarContent, formatFecha, formatFechaHora, formatPuntos, toast, humanizeError, ahora } from '../utils.js';
+import { el, avatarContent, formatFecha, formatFechaHora, formatPuntos, toast, humanizeError, ahora, todayISO } from '../utils.js';
 import { icon } from '../icons.js';
 import { navigate } from '../router.js';
 import { comprimirFotoPerfil } from '../avatar.js';
@@ -130,7 +130,7 @@ async function renderTarjetaFemenil(profile) {
               onclick: async (e) => {
                 e.target.disabled = true;
                 try { await alternarInteresFemenil(profile.id, cat); await pintar(); }
-                catch (err) { e.target.disabled = false; }
+                catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
               },
             }, d.interesada ? 'Ya no me interesa' : 'Anotarme'),
       ]);
@@ -487,7 +487,10 @@ export async function renderPerfil() {
     const list = el('div', { class: 'card' });
     suspensiones.forEach((s, i) => {
       if (i > 0) list.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
-      const hoy = ahora().toISOString().slice(0, 10);
+      // Con hora UTC aqui y CDMX en el resto de la app, cerca de medianoche
+      // se podia ver una suspension como "Activa"/"Terminada" un dia antes o
+      // despues de lo real — todayISO() ya usa la zona horaria del club.
+      const hoy = todayISO();
       const activa = !s.lifted_at && (!s.end_date || s.end_date >= hoy);
       list.appendChild(el('div', { class: 'row-between' }, [
         el('div', {}, [

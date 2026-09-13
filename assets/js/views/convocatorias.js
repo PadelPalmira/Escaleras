@@ -233,10 +233,18 @@ function renderAcciones(f, profile, refresh) {
   const acciones = el('div', { class: 'stack gap-2 mt-4' });
   const tengoLugar = f.mi_status === 'confirmed' || f.mi_status === 'substitute';
   const enEspera = f.mi_status === 'waitlist';
-  const yaEmpezo = Number(f.horas_faltantes) <= 0;
+  // El reloj de "horas_faltantes" NO es lo mismo que el estado real de la
+  // noche: recepción puede tardarse en arrancarla aunque ya haya pasado la
+  // hora (el registro sigue abierto hasta que de verdad la arranquen), y al
+  // revés, en cuanto la arrancan ya no se puede actuar aunque el reloj diga
+  // que "faltan" minutos. Por eso todo esto se decide con esc_status, no con
+  // el reloj.
+  const enJuego = f.esc_status === 'in_progress';
+  const yaCerro = f.esc_status === 'completed';
 
-  if (yaEmpezo && !tengoLugar && !enEspera) {
-    acciones.appendChild(el('p', { class: 'text-tiny' }, 'Esta sesión ya empezó.'));
+  if ((enJuego || yaCerro) && !tengoLugar && !enEspera) {
+    acciones.appendChild(el('p', { class: 'text-tiny' },
+      yaCerro ? 'Esta noche ya se jugó.' : 'Esta noche ya está en juego — para anotarte de último momento, habla con recepción.'));
     return acciones;
   }
 
@@ -270,6 +278,17 @@ function renderAcciones(f, profile, refresh) {
         'Tu lugar es provisional hasta las 6:00 pm del domingo: si se anota una pareja con mejor promedio de puntos, pueden desplazarlos.'));
     }
 
+    // Con la noche ya en juego o ya cerrada no hay autoservicio: cambiar
+    // registros ahí no mueve canchas ni deshace puntos ya jugados. Cualquier
+    // cambio de última hora lo hace recepción a mano.
+    if (enJuego || yaCerro) {
+      acciones.appendChild(el('div', { class: 'aviso aviso-neutral' },
+        yaCerro
+          ? 'Esta noche ya se jugó — para cualquier corrección habla con recepción.'
+          : 'Esta noche ya está en juego — para cualquier cambio (baja, sustituto) habla con recepción.'));
+      return acciones;
+    }
+
     const fila = el('div', { class: 'btn-row' });
     if (tengoLugar && f.formato === 'individual') {
       const btnSub = el('button', { class: 'btn btn-secondary btn-sm' }, 'Buscar sustituto');
@@ -281,6 +300,15 @@ function renderAcciones(f, profile, refresh) {
     fila.appendChild(btnBaja);
     acciones.appendChild(fila);
     return acciones;
+  }
+
+  // Si el estado que quedó es "declined" (rechazaste una invitación de
+  // pareja, o se venció sola a la hora), la tarjeta vuelve al flujo normal
+  // de registro — pero sin esta nota se vería como si nunca hubiera pasado
+  // nada, y el jugador se queda sin saber qué fue de esa invitación.
+  if (f.mi_status === 'declined') {
+    acciones.appendChild(el('p', { class: 'text-tiny', style: 'color:var(--text-tertiary);' },
+      'Tu invitación de pareja anterior para esta noche venció o la rechazaste — puedes volver a intentarlo.'));
   }
 
   // Sin lugar: ofrecer registro según el momento de la semana.
@@ -598,7 +626,11 @@ function renderRetas(f, profile, refresh) {
     namesLine.textContent = inscritos.length
       ? inscritos.map((r) => (r.profiles?.full_name || 'Jugador').trim().split(' ')[0]).join(', ')
       : 'Todavía nadie se ha anotado — sé el primero en animar.';
-  }).catch(() => { namesLine.textContent = ''; });
+  }).catch((err) => {
+    console.error('No se pudo cargar quién va a Retas Abiertas:', err);
+    countLine.querySelector('.retas-count-number').textContent = '—';
+    namesLine.textContent = 'No se pudo cargar quién va — no afecta tu anotación, solo esta lista.';
+  });
 
   return box;
 }

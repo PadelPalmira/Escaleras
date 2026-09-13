@@ -5,7 +5,7 @@ import {
   getMiCalificacionLiguilla, getCalificadosConfirmados, getParejasLiguilla, getMiParejaLiguilla,
   getPickActualDraft, getPartidosLiguilla, responderCalificacionLiguilla, hacerPickDraft, responderPickDraft,
   autoprogramarLiguillaMes, getEventoLiguillaDelMes, getLiguillaTablaVivo, getMiCarreraLiguilla,
-  getCampeonesHistoricos,
+  getCampeonesHistoricos, getAjusteNum,
 } from '../api.js';
 import { generarTarjetaLiguilla, compartirTarjeta } from '../vendor/sharecard.js';
 
@@ -215,7 +215,7 @@ async function renderCuerpoTier(tier, profile, onChange) {
   const misCalificacion = await getMiCalificacionLiguilla(evento.id, profile.id);
 
   if (evento.status === 'scheduled' || evento.status === 'qualifying') {
-    wrap.appendChild(renderSeccionCalificacion(misCalificacion, evento, onChange));
+    wrap.appendChild(await renderSeccionCalificacion(misCalificacion, evento, onChange));
   } else if (evento.status === 'draft_open') {
     wrap.appendChild(await renderSeccionDraft(evento, profile, misCalificacion, onChange));
   } else if (evento.status === 'confirmed' || evento.status === 'in_progress' || evento.status === 'completed') {
@@ -343,7 +343,7 @@ function diasRestantes(fechaISO) {
   return `Faltan ${dias} días.`;
 }
 
-function renderSeccionCalificacion(misCalificacion, evento, onChange) {
+async function renderSeccionCalificacion(misCalificacion, evento, onChange) {
   if (!misCalificacion) {
     return el('div', { class: 'card' }, el('p', { class: 'text-muted' }, 'No calificaste a esta edición — se invita a los primeros 12 lugares del ranking de tu categoría.'));
   }
@@ -351,7 +351,33 @@ function renderSeccionCalificacion(misCalificacion, evento, onChange) {
   card.appendChild(el('p', { style: 'font-weight:600;' }, QUALIFIER_STATUS_LABEL[misCalificacion.status] || misCalificacion.status));
 
   if (misCalificacion.status === 'invited') {
-    card.appendChild(el('p', { class: 'text-muted mt-2 mb-4' }, 'Confirma tu lugar antes de que cierre el plazo (normalmente 24h antes del evento).'));
+    // Mismo corte que ya aplica el servidor (responder_calificacion_liguilla):
+    // 24h antes del evento para los invitados originales — los que entran
+    // por cascada (substitute_for_qualifier_id) no tienen ese límite, solo
+    // el de que el evento ya haya arrancado. Se calcula aquí para no dejar
+    // un botón vivo que de todos modos el backend va a rechazar: antes, el
+    // jugador solo se enteraba con un error después de darle clic.
+    const cutoffHours = await getAjusteNum('liguilla_cutoff_hours', 24);
+    const inicio = evento.event_date ? new Date(`${evento.event_date}T19:00:00-06:00`) : null;
+    const cutoff = inicio ? new Date(inicio.getTime() - cutoffHours * 3600000) : null;
+    const esCascada = !!misCalificacion.substitute_for_qualifier_id;
+    const ahoraMs = Date.now();
+    const eventoYaEmpezo = !!(inicio && ahoraMs > inicio.getTime());
+    const plazoVencido = !esCascada && !!(cutoff && ahoraMs > cutoff.getTime());
+
+    if (eventoYaEmpezo) {
+      card.appendChild(el('div', { class: 'aviso aviso-neutral mt-2' },
+        'El evento ya empezó — ya no puedes confirmar ni rechazar tu lugar desde aquí. Si hay algún problema, habla con recepción.'));
+      return card;
+    }
+    if (plazoVencido) {
+      card.appendChild(el('div', { class: 'aviso aviso-warn mt-2' },
+        `Se venció el plazo para confirmar tu lugar (${cutoffHours} h antes del evento). Si de verdad quieres jugar, habla con recepción.`));
+      return card;
+    }
+
+    card.appendChild(el('p', { class: 'text-muted mt-2 mb-4' },
+      `Confirma tu lugar antes de que cierre el plazo (${cutoffHours} h antes del evento).`));
     const row = el('div', { class: 'btn-row' });
     const btnNo = el('button', { class: 'btn btn-secondary' }, 'Rechazar');
     const btnSi = el('button', { class: 'btn btn-primary' }, 'Confirmar mi lugar');
