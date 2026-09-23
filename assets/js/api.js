@@ -527,6 +527,15 @@ export async function responderPickDraft(pickId, aceptar) {
   return data;
 }
 
+/** Solo mientras el evento sigue en 'scheduled' o 'qualifying' (antes del draft). */
+export async function reprogramarEventoLiguilla(liguillaEventId, nuevaFecha) {
+  const { error } = await supabase.rpc('reprogramar_evento_liguilla', {
+    p_liguilla_event_id: liguillaEventId,
+    p_nueva_fecha: nuevaFecha,
+  });
+  if (error) throw error;
+}
+
 /* ============================================================
    RBAC — helpers de solo-lectura sobre el rol ya cargado en el
    perfil de sesión. La aplicación real de permisos siempre ocurre

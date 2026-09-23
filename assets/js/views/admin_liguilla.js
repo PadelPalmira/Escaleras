@@ -1,11 +1,12 @@
-import { el, formatFecha, toast, humanizeError, openSheet, confirmSheet, todayISO, avatarContent, chipJugador } from '../utils.js';
+import { el, formatFecha, formatFechaHora, toast, humanizeError, openSheet, confirmSheet, todayISO, avatarContent, chipJugador } from '../utils.js';
 import { icon } from '../icons.js';
 import {
   getMyProfile, esAdminOMaestro,
   getLiguillaEventosAdmin, crearEventoLiguilla, generarCalificadosLiguilla, getCalificadosLiguillaAdmin,
   cerrarConfirmacionesLiguilla, autogenerarParejasRestantes, cancelarLiguillaSinJugadores,
   generarRonda1Liguilla, registrarResultadoLiguillaMatch, sustituirCalificadoLiguilla, buscarJugadores,
-  getParejasLiguilla, getPartidosLiguilla, getPickActualDraft,
+  getParejasLiguilla, getPartidosLiguilla, getPickActualDraft, responderPickDraft,
+  reprogramarEventoLiguilla,
 } from '../api.js';
 
 const TIER_LABEL = { liguilla_a: 'Liguilla · Categoría A', ascenso_b: 'Liguilla Categoría B' };
@@ -130,6 +131,10 @@ async function cargarDetalle(wrap, eventId) {
     el('p', { class: 'text-muted mt-2' }, `${ev.month_key}${ev.event_date ? ' · ' + formatFecha(ev.event_date) : ''}`),
   ]));
 
+  if (ev.status === 'scheduled' || ev.status === 'qualifying') {
+    wrap.appendChild(renderReprogramarFecha(ev, refresh));
+  }
+
   if (ev.status === 'scheduled') {
     wrap.appendChild(el('div', { class: 'card' }, [
       el('p', { class: 'text-muted mb-3' }, 'Invita a los primeros 12 lugares del ranking de este tier (más lista de espera).'),
@@ -184,8 +189,26 @@ async function cargarDetalle(wrap, eventId) {
     if (pick) {
       const texto = pick.status === 'pending'
         ? `Le toca elegir a ${pick.picker?.full_name || '—'}.`
-        : `${pick.picker?.full_name || '—'} ofreció pareja a ${pick.picked?.full_name || '—'} — esperando respuesta.`;
-      wrap.appendChild(el('div', { class: 'card' }, el('p', {}, texto)));
+        : `${pick.picker?.full_name || '—'} ofreció pareja a ${pick.picked?.full_name || '—'} — esperando respuesta` +
+          (pick.expires_at ? ` (se vence sola el ${formatFechaHora(pick.expires_at)}).` : '.');
+      const card = el('div', { class: 'card' }, [el('p', {}, texto)]);
+      if (pick.status === 'offered') {
+        card.appendChild(el('button', {
+          class: 'btn btn-secondary btn-sm mt-2', style: 'width:auto;',
+          onclick: async (e) => {
+            const ok = await confirmSheet({
+              title: '¿Forzar declinar esta oferta?',
+              body: `Se marca como que ${pick.picked?.full_name || 'esa persona'} declinó, y se pasa al siguiente candidato disponible para ${pick.picker?.full_name || 'quien elige'}.`,
+              confirmLabel: 'Sí, forzar',
+            });
+            if (!ok) return;
+            e.target.disabled = true;
+            try { await responderPickDraft(pick.id, false); toast('Oferta declinada; se pasó al siguiente candidato.', 'success'); refresh(); }
+            catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
+          },
+        }, 'Forzar declinar'));
+      }
+      wrap.appendChild(card);
     } else {
       wrap.appendChild(el('div', { class: 'card' }, el('p', { class: 'text-muted' }, 'El draft ya no tiene turnos pendientes.')));
     }
@@ -233,6 +256,36 @@ async function cargarDetalle(wrap, eventId) {
     await pintarBracketAdmin(wrap, eventId, ev.status === 'in_progress', refresh);
     return;
   }
+}
+
+function renderReprogramarFecha(ev, onChange) {
+  const dateInput = el('input', { class: 'input', type: 'date', value: ev.event_date || '' });
+  const errBox = el('p', { class: 'text-tiny mt-1', style: 'color:var(--danger);display:none;' });
+  const btn = el('button', { class: 'btn btn-secondary btn-sm mt-2', style: 'width:auto;' }, 'Mover fecha');
+  btn.addEventListener('click', async () => {
+    errBox.style.display = 'none';
+    if (!dateInput.value) { errBox.textContent = 'Elige una fecha.'; errBox.style.display = 'block'; return; }
+    const ok = await confirmSheet({
+      title: '¿Mover la fecha de este evento?',
+      body: 'Si ya hay una noche enlazada sin nadie registrado, también se le mueve la fecha a ella.',
+      confirmLabel: 'Sí, mover',
+    });
+    if (!ok) return;
+    btn.disabled = true; btn.textContent = 'Moviendo…';
+    try {
+      await reprogramarEventoLiguilla(ev.id, dateInput.value);
+      toast('Fecha actualizada.', 'success');
+      onChange();
+    } catch (err) {
+      errBox.textContent = humanizeError(err); errBox.style.display = 'block';
+      btn.disabled = false; btn.textContent = 'Mover fecha';
+    }
+  });
+  return el('div', { class: 'card mt-3' }, [
+    el('p', { class: 'text-tiny mb-2' }, 'Fecha del evento (se puede mover mientras no arranque el draft).'),
+    el('div', { class: 'row gap-2', style: 'align-items:flex-end;' }, [dateInput, btn]),
+    errBox,
+  ]);
 }
 
 function renderCancelarSinJugadores(eventId, onChange) {
