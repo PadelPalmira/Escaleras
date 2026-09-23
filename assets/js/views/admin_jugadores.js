@@ -63,6 +63,21 @@ async function pintarResultados(box, filtro, wrap) {
 
 async function pintarFicha(wrap, jugador) {
   wrap.innerHTML = '';
+  wrap.appendChild(el('div', { class: 'stack', style: 'padding-top:60px;' }, [el('div', { class: 'spinner' })]));
+  try {
+    await cargarFicha(wrap, jugador);
+  } catch (err) {
+    wrap.innerHTML = '';
+    wrap.appendChild(el('div', { class: 'stack' }, [
+      el('p', { class: 'text-muted' }, humanizeError(err)),
+      el('button', { class: 'btn btn-secondary', onclick: () => pintarFicha(wrap, jugador) }, 'Reintentar'),
+      el('button', { class: 'btn btn-ghost btn-sm', onclick: () => renderAdminJugadores().then((n) => wrap.replaceWith(n)) }, '← Volver a la búsqueda'),
+    ]));
+  }
+}
+
+async function cargarFicha(wrap, jugador) {
+  wrap.innerHTML = '';
   wrap.appendChild(el('button', { class: 'btn btn-ghost btn-sm mb-3', style: 'width:auto;padding-left:0;', onclick: () => renderAdminJugadores().then((n) => wrap.replaceWith(n)) }, '← Volver a la búsqueda'));
 
   const refresh = () => pintarFicha(wrap, jugador);
@@ -270,13 +285,14 @@ async function abrirSustituto(registro, jugador, formato, onChange) {
     const jugadores = await buscarJugadores(filtro, 20);
     list.innerHTML = '';
     jugadores.filter((j) => j.id !== jugador.id).forEach((j) => {
-      list.appendChild(chipJugador(j, async () => {
+      list.appendChild(chipJugador(j, async (e) => {
+        e.target.closest('button').disabled = true;
         try {
           if (esParejas) await asignarSustitutoAdmin(registro.id, j.id, 'Emergencia — ficha de jugador');
           else await asignarSustituto(registro.id, j.id, esCoach);
           toast(`${j.full_name} jugará en su lugar.`, 'success'); handle.close(); onChange();
         }
-        catch (err) { toast(humanizeError(err), 'error'); }
+        catch (err) { toast(humanizeError(err), 'error'); e.target.closest('button').disabled = false; }
       }));
     });
     if (list.children.length === 0) list.appendChild(el('p', { class: 'text-muted' }, 'Sin resultados.'));

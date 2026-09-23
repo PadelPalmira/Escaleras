@@ -448,7 +448,13 @@ async function confirmarBaja(f, refresh) {
    Selector de pareja
    ============================================================ */
 async function abrirSelectorPareja(f, profile, aListaEspera, refresh) {
-  const jugadores = await getJugadoresParaPareja(f.escalera_id, profile.id);
+  let jugadores;
+  try {
+    jugadores = await getJugadoresParaPareja(f.escalera_id, profile.id);
+  } catch (err) {
+    toast(humanizeError(err), 'error');
+    return;
+  }
   const content = el('div');
   content.appendChild(el('div', { class: 'sheet-title' }, 'Elige a tu pareja'));
   content.appendChild(el('p', { class: 'text-muted mb-3' },
@@ -525,7 +531,13 @@ async function abrirSelectorPareja(f, profile, aListaEspera, refresh) {
    Selector de sustituto (solo Individual)
    ============================================================ */
 async function abrirSelectorSustituto(f, profile, refresh) {
-  const jugadores = await getJugadoresParaPareja(f.escalera_id, profile.id);
+  let jugadores;
+  try {
+    jugadores = await getJugadoresParaPareja(f.escalera_id, profile.id);
+  } catch (err) {
+    toast(humanizeError(err), 'error');
+    return;
+  }
   let esCoach = false;
   const content = el('div');
   content.appendChild(el('div', { class: 'sheet-title' }, 'Buscar sustituto'));

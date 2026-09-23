@@ -1,4 +1,4 @@
-import { el, formatFecha, toast, humanizeError, openSheet, confirmSheet, ahora, avatarContent, chipJugador } from '../utils.js';
+import { el, formatFecha, toast, humanizeError, openSheet, confirmSheet, todayISO, avatarContent, chipJugador } from '../utils.js';
 import { icon } from '../icons.js';
 import {
   getMyProfile, esAdminOMaestro,
@@ -68,8 +68,7 @@ async function pintarLista(wrap) {
 function abrirCrearEvento(wrap) {
   const content = el('div');
   content.appendChild(el('div', { class: 'sheet-title' }, 'Nueva edición de Liguilla'));
-  const hoy = ahora();
-  const monthDefault = `${hoy.getUTCFullYear()}-${String(hoy.getUTCMonth() + 1).padStart(2, '0')}`;
+  const monthDefault = todayISO().slice(0, 7);
   const monthInput = el('input', { class: 'input', type: 'text', value: monthDefault, placeholder: 'AAAA-MM' });
   const tierSelect = el('select', { class: 'input' }, [
     el('option', { value: 'liguilla_a' }, 'Liguilla · Categoría A'),
@@ -101,7 +100,19 @@ function abrirCrearEvento(wrap) {
 async function pintarDetalle(wrap, eventId) {
   wrap.innerHTML = '';
   wrap.appendChild(el('div', { class: 'stack', style: 'padding-top:60px;' }, [el('div', { class: 'spinner' })]));
+  try {
+    await cargarDetalle(wrap, eventId);
+  } catch (err) {
+    wrap.innerHTML = '';
+    wrap.appendChild(el('div', { class: 'stack' }, [
+      el('p', { class: 'text-muted' }, humanizeError(err)),
+      el('button', { class: 'btn btn-secondary', onclick: () => pintarDetalle(wrap, eventId) }, 'Reintentar'),
+      el('button', { class: 'btn btn-ghost btn-sm', onclick: () => pintarLista(wrap) }, '← Volver a la lista'),
+    ]));
+  }
+}
 
+async function cargarDetalle(wrap, eventId) {
   const eventos = await getLiguillaEventosAdmin();
   const ev = eventos.find((e) => e.id === eventId);
   wrap.innerHTML = '';
@@ -160,8 +171,8 @@ async function pintarDetalle(wrap, eventId) {
     wrap.appendChild(el('div', { class: 'card mt-4' }, [
       el('p', { class: 'text-muted mb-3' }, 'Cierra la confirmación para pasar al draft. Si aún no se alcanza el corte de 24h, puedes forzarlo.'),
       el('div', { class: 'btn-row' }, [
-        el('button', { class: 'btn btn-secondary', onclick: () => cerrarConf(eventId, false, refresh) }, 'Cerrar confirmaciones'),
-        el('button', { class: 'btn btn-secondary', onclick: () => cerrarConf(eventId, true, refresh) }, 'Forzar cierre ahora'),
+        el('button', { class: 'btn btn-secondary', onclick: (e) => cerrarConf(eventId, false, refresh, e.target) }, 'Cerrar confirmaciones'),
+        el('button', { class: 'btn btn-secondary', onclick: (e) => cerrarConf(eventId, true, refresh, e.target) }, 'Forzar cierre ahora'),
       ]),
     ]));
     wrap.appendChild(renderCancelarSinJugadores(eventId, refresh));
@@ -190,8 +201,8 @@ async function pintarDetalle(wrap, eventId) {
     wrap.appendChild(el('div', { class: 'card mt-4' }, [
       el('p', { class: 'text-muted mb-3' }, 'Si el draft se atora, puedes emparejar automáticamente a los jugadores restantes por nivel (normalmente disponible 2h antes del evento).'),
       el('div', { class: 'btn-row' }, [
-        el('button', { class: 'btn btn-secondary', onclick: () => autogenerar(eventId, false, refresh) }, 'Autogenerar restantes'),
-        el('button', { class: 'btn btn-secondary', onclick: () => autogenerar(eventId, true, refresh) }, 'Forzar ahora'),
+        el('button', { class: 'btn btn-secondary', onclick: (e) => autogenerar(eventId, false, refresh, e.target) }, 'Autogenerar restantes'),
+        el('button', { class: 'btn btn-secondary', onclick: (e) => autogenerar(eventId, true, refresh, e.target) }, 'Forzar ahora'),
       ]),
     ]));
     wrap.appendChild(renderCancelarSinJugadores(eventId, refresh));
@@ -238,13 +249,15 @@ function renderCancelarSinJugadores(eventId, onChange) {
   return card;
 }
 
-async function cerrarConf(eventId, force, onChange) {
+async function cerrarConf(eventId, force, onChange, btn) {
+  if (btn) btn.disabled = true;
   try { const r = await cerrarConfirmacionesLiguilla(eventId, force); toast(`${r.confirmados} confirmados, ${r.declinados} declinados, ${r.promovidos} promovidos.`, 'success'); onChange(); }
-  catch (err) { toast(humanizeError(err), 'error'); }
+  catch (err) { toast(humanizeError(err), 'error'); if (btn) btn.disabled = false; }
 }
-async function autogenerar(eventId, force, onChange) {
+async function autogenerar(eventId, force, onChange, btn) {
+  if (btn) btn.disabled = true;
   try { const n = await autogenerarParejasRestantes(eventId, force); toast(`${n} pareja(s) generada(s) automáticamente.`, 'success'); onChange(); }
-  catch (err) { toast(humanizeError(err), 'error'); }
+  catch (err) { toast(humanizeError(err), 'error'); if (btn) btn.disabled = false; }
 }
 
 function abrirSustituirCalificado(calificado, onChange) {

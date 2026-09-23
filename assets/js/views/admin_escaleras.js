@@ -217,10 +217,21 @@ async function pintarDetalle(wrap, escaleraId) {
   // El tope de rondas se pide junto con lo demas: si se pidiera despues, la
   // pantalla pintaria el roster y las rondas llegarian tarde, que es justo el
   // momento en que recepcion esta esperando ver la ronda nueva.
-  const [escaleras, registros, rondas, tope, minutosRonda] = await Promise.all([
-    getEscalerasAdmin(), getRegistrosEscalera(escaleraId), getRondasConPartidos(escaleraId),
-    getAjusteNum('max_rondas_escalera', 7), getAjusteNum('minutos_por_ronda', 15),
-  ]);
+  let escaleras, registros, rondas, tope, minutosRonda;
+  try {
+    [escaleras, registros, rondas, tope, minutosRonda] = await Promise.all([
+      getEscalerasAdmin(), getRegistrosEscalera(escaleraId), getRondasConPartidos(escaleraId),
+      getAjusteNum('max_rondas_escalera', 7), getAjusteNum('minutos_por_ronda', 15),
+    ]);
+  } catch (err) {
+    wrap.innerHTML = '';
+    wrap.appendChild(el('div', { class: 'stack' }, [
+      el('p', { class: 'text-muted' }, humanizeError(err)),
+      el('button', { class: 'btn btn-secondary', onclick: () => pintarDetalle(wrap, escaleraId) }, 'Reintentar'),
+      el('button', { class: 'btn btn-ghost btn-sm', onclick: () => pintarLista(wrap) }, '← Volver a la lista'),
+    ]));
+    return;
+  }
   const esc = escaleras.find((e) => e.id === escaleraId);
   wrap.innerHTML = '';
   if (!esc) { wrap.appendChild(el('p', { class: 'text-muted' }, 'Esa escalera ya no está disponible.')); return; }

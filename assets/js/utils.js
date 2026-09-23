@@ -122,6 +122,18 @@ export function formatFecha(dateStr) {
   const s = fmtDate.format(d);
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
+/* Para timestamps con hora (timestamptz), NO para columnas `date` puras.
+   formatFecha() de arriba asume que ya le mandas una fecha calendario y le
+   pega mediodía UTC para no correrse de día; si en cambio le mandas
+   `x.slice(0, 10)` de un timestamptz (ej. cashbacks.earned_at, fines.applied_at)
+   estás cortando la fecha en UTC ANTES de que nadie convierta a CDMX — cerca
+   de la noche (18:00–24:00 CDMX) eso adelanta la fecha mostrada un día. Esta
+   función sí convierte primero a CDMX y luego saca el día. */
+export function formatFechaDeTimestamp(isoTs) {
+  if (!isoTs) return '';
+  const s = fmtDate.format(new Date(isoTs));
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 export function formatFechaCorta(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr + 'T12:00:00Z');
@@ -129,8 +141,6 @@ export function formatFechaCorta(dateStr) {
 }
 export function formatHora(timeStr) {
   if (!timeStr) return '';
-  const [h, m] = timeStr.split(':');
-  const d = new Date(); d.setUTCHours(0, 0, 0, 0);
   const local = new Date(`2000-01-01T${timeStr}`);
   return local.toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit', hour12: true });
 }

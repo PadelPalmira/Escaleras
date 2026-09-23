@@ -194,7 +194,16 @@ async function renderCuerpoTier(tier, profile, onChange) {
 
   wrap.appendChild(await renderCarreraDelMes(tier, eventoMes, profile, onChange));
 
-  const evento = await getEventoLiguillaActivo([tier]);
+  // Igual que el banner de Liguilla en Inicio: si esto falla, la pestaña no
+  // se debe quedar tumbada mostrando el error genérico — se degrada a "sin
+  // evento activo" (la carrera del mes de arriba ya se pintó bien).
+  let evento = null;
+  try {
+    evento = await getEventoLiguillaActivo([tier]);
+  } catch (err) {
+    console.error('No se pudo cargar el evento activo de Liguilla:', err);
+    return wrap;
+  }
   if (!evento) return wrap;
 
   // La tarjeta de arriba ya dice cuándo es y cómo va la carrera; esta solo
@@ -212,7 +221,12 @@ async function renderCuerpoTier(tier, profile, onChange) {
     );
   }
 
-  const misCalificacion = await getMiCalificacionLiguilla(evento.id, profile.id);
+  let misCalificacion = null;
+  try {
+    misCalificacion = await getMiCalificacionLiguilla(evento.id, profile.id);
+  } catch (err) {
+    console.error('No se pudo cargar tu calificación de Liguilla:', err);
+  }
 
   if (evento.status === 'scheduled' || evento.status === 'qualifying') {
     wrap.appendChild(await renderSeccionCalificacion(misCalificacion, evento, onChange));

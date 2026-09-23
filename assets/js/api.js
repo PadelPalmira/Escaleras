@@ -328,7 +328,7 @@ export async function salirRetasAbiertas(registrationId) {
 export async function getInscritosRetas(escaleraId) {
   const { data, error } = await supabase
     .from('escalera_registrations')
-    .select('id, player_id, confirmed_at, profiles(full_name)')
+    .select('id, player_id, confirmed_at, profiles!escalera_registrations_player_id_fkey(full_name)')
     .eq('escalera_id', escaleraId)
     .eq('status', 'confirmed')
     .order('confirmed_at', { ascending: true });
@@ -583,7 +583,7 @@ export async function marcarMultaEstado(fineId, status) {
 }
 
 export async function getMultasAdmin({ soloPendientes = false } = {}) {
-  let q = supabase.from('fines').select('*, profiles(full_name)').order('applied_at', { ascending: false });
+  let q = supabase.from('fines').select('*, profiles!fines_player_id_fkey(full_name)').order('applied_at', { ascending: false });
   if (soloPendientes) q = q.eq('status', 'pending');
   const { data, error } = await q;
   if (error) throw error;
@@ -610,7 +610,7 @@ export async function levantarSuspension(suspensionId, playerId) {
 export async function getSuspensionesAdmin() {
   const { data, error } = await supabase
     .from('suspensions')
-    .select('*, profiles(full_name)')
+    .select('*, profiles!suspensions_player_id_fkey(full_name)')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data;
@@ -621,12 +621,18 @@ export async function getSuspensionesAdmin() {
    ============================================================ */
 
 export async function getEscalerasAdmin() {
-  const desde = ahora();
-  desde.setUTCDate(desde.getUTCDate() - 14);
+  // Ojo: restar días sobre `ahora()` (un instante real) en UTC puede quedar
+  // corrido si son las últimas horas del día en CDMX (UTC ya se adelantó al
+  // día siguiente). Por eso se resta sobre la fecha CDMX de hoy (todayISO),
+  // anclada a medianoche UTC solo para la aritmética de días — igual que
+  // getProximasEscaleras.
+  const desdeDate = new Date(todayISO() + 'T00:00:00Z');
+  desdeDate.setUTCDate(desdeDate.getUTCDate() - 14);
+  const desde = desdeDate.toISOString().slice(0, 10);
   const { data, error } = await supabase
     .from('escaleras')
     .select('*, weekday_schedule(*)')
-    .gte('session_date', desde.toISOString().slice(0, 10))
+    .gte('session_date', desde)
     .not('status', 'in', '("cancelled")')
     .order('session_date', { ascending: false });
   if (error) throw error;
@@ -657,7 +663,7 @@ export async function getConteosRegistros(escaleraIds) {
 export async function getRegistrosEscalera(escaleraId) {
   const { data, error } = await supabase
     .from('escalera_registrations')
-    .select('*, profiles(full_name, avatar_url, phone)')
+    .select('*, profiles!escalera_registrations_player_id_fkey(full_name, avatar_url, phone)')
     .eq('escalera_id', escaleraId)
     .order('status', { ascending: true });
   if (error) throw error;

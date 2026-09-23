@@ -1,4 +1,4 @@
-import { el, formatHora, toast, humanizeError, confirmSheet, avatarContent, chipJugador } from '../utils.js';
+import { el, formatHora, toast, humanizeError, confirmSheet, avatarContent, chipJugador, todayISO } from '../utils.js';
 import {
   getMyProfile, esMaestro,
   getSystemSettingsAll, updateSystemSetting, getWeekdayScheduleAll, updateWeekdaySchedule,
@@ -57,8 +57,9 @@ export async function renderMaestro() {
 }
 
 function mesActualKey() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  // Mes actual en hora de CDMX, no la zona/reloj del dispositivo del Maestro
+  // (importa si viaja o trae mal puesta la zona horaria del celular).
+  return todayISO().slice(0, 7);
 }
 
 async function pintarReporteCashbacks(box) {

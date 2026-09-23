@@ -1,4 +1,4 @@
-import { el, avatarContent, formatFecha, formatFechaHora, formatPuntos, toast, humanizeError, ahora, todayISO } from '../utils.js';
+import { el, avatarContent, formatFecha, formatFechaHora, formatFechaDeTimestamp, formatPuntos, toast, humanizeError, ahora, todayISO } from '../utils.js';
 import { icon } from '../icons.js';
 import { navigate } from '../router.js';
 import { comprimirFotoPerfil } from '../avatar.js';
@@ -179,14 +179,14 @@ function renderTarjetaCashback(c) {
     el('div', { class: 'row-between' }, [
       el('div', {}, [
         el('div', { style: 'font-weight:800;font-size:20px;' }, `$${Number(c.amount_mxn).toLocaleString('es-MX')} MXN`),
-        el('div', { class: 'text-tiny mt-1' }, `Ganado el ${formatFecha(c.earned_at.slice(0, 10))} — Escalera del ${formatFecha(c.session_date)}`),
+        el('div', { class: 'text-tiny mt-1' }, `Ganado el ${formatFechaDeTimestamp(c.earned_at)} — Escalera del ${formatFecha(c.session_date)}`),
       ]),
       el('span', { class: `badge ${st.cls}` }, st.text),
     ]),
-    c.status === 'disponible' ? el('p', { class: 'text-tiny mt-2' }, `Vence en ${diasRestantes(c.expires_at)} día(s) — ${formatFecha(c.expires_at.slice(0, 10))}.`) : null,
+    c.status === 'disponible' ? el('p', { class: 'text-tiny mt-2' }, `Vence en ${diasRestantes(c.expires_at)} día(s) — ${formatFechaDeTimestamp(c.expires_at)}.`) : null,
     c.status === 'no_disponible_hoy' ? el('p', { class: 'text-tiny mt-2' }, 'Lo ganaste hoy — puedes usarlo a partir de tu próxima visita, no el mismo día.') : null,
     c.status === 'usado' ? el('p', { class: 'text-tiny mt-2' }, `Usado el ${formatFechaHora(c.used_at)}`) : null,
-    c.status === 'vencido' ? el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' }, `Venció el ${formatFecha(c.expires_at.slice(0, 10))} sin usarse.`) : null,
+    c.status === 'vencido' ? el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' }, `Venció el ${formatFechaDeTimestamp(c.expires_at)} sin usarse.`) : null,
     puedeMostrarQR ? el('div', { class: 'mt-3', style: 'text-align:center;' }, [
       dibujarQR(`CB1:${c.redeem_token}`, 160),
       el('p', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' }, 'Enséñale este código a recepción para usarlo.'),
@@ -473,7 +473,7 @@ export async function renderPerfil() {
       list.appendChild(el('div', { class: 'row-between' }, [
         el('div', {}, [
           el('div', { style: 'font-weight:700;' }, `$${Number(m.amount_mxn).toLocaleString('es-MX')} MXN`),
-          el('div', { class: 'text-tiny' }, `${m.reason || 'Sin motivo especificado'} · ${formatFecha(m.applied_at.slice(0, 10))}`),
+          el('div', { class: 'text-tiny' }, `${m.reason || 'Sin motivo especificado'} · ${formatFechaDeTimestamp(m.applied_at)}`),
         ]),
         el('span', { class: `badge ${st.cls}` }, st.text),
       ]));
