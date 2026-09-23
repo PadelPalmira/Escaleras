@@ -251,7 +251,12 @@ function renderCancelarSinJugadores(eventId, onChange) {
 
 async function cerrarConf(eventId, force, onChange, btn) {
   if (btn) btn.disabled = true;
-  try { const r = await cerrarConfirmacionesLiguilla(eventId, force); toast(`${r.confirmados} confirmados, ${r.declinados} declinados, ${r.promovidos} promovidos.`, 'success'); onChange(); }
+  try {
+    const r = await cerrarConfirmacionesLiguilla(eventId, force);
+    const base = `${r.confirmados} confirmados, ${r.declinados} declinados, ${r.promovidos} promovidos.`;
+    toast(r.draft_iniciado ? `${base} ¡Draft iniciado!` : base, 'success');
+    onChange();
+  }
   catch (err) { toast(humanizeError(err), 'error'); if (btn) btn.disabled = false; }
 }
 async function autogenerar(eventId, force, onChange, btn) {

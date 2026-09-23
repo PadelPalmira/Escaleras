@@ -4,7 +4,7 @@ import {
   getMyProfile, esAdminOMaestro,
   getEscalerasAdmin, getRegistrosEscalera, getRondasConPartidos,
   generarSiguienteRonda, registrarResultadoPartido, corregirResultadoPartido, cerrarEscalera,
-  marcarNoShow, cancelarRegistro, asignarSustituto, asignarSustitutoAdmin, buscarJugadores,
+  marcarNoShow, cancelarRegistro, asignarSustituto, asignarSustitutoAdmin, deshacerSustituto, buscarJugadores,
   cancelarEscaleraAdmin,
   comenzarEscalera, adminAgregarJugador, getAjusteNum,
   iniciarCronometroRonda, horaServidor,
@@ -908,6 +908,14 @@ function renderRoster(esc, ws, registros, confirmados, enEspera, cupo, refresh) 
     if (['confirmed', 'substitute'].includes(r.status) && esc.status === 'scheduled') {
       card.appendChild(el('div', { class: 'btn-row mt-2' }, [
         el('button', { class: 'btn btn-secondary btn-sm', onclick: () => abrirSustituto(r, refresh, ws.format) }, 'Sustituto'),
+        r.status === 'substitute' && r.substitute_for_registration_id && !r.is_coach_substitute
+          ? el('button', { class: 'btn btn-secondary btn-sm', onclick: async () => {
+              const ok = await confirmSheet({ title: '¿Deshacer sustituto?', body: 'El sustituto se libera y el registro original vuelve a estar confirmado.', confirmLabel: 'Sí, deshacer' });
+              if (!ok) return;
+              try { await deshacerSustituto(r.id); toast('Sustituto deshecho.', 'success'); refresh(); }
+              catch (err) { toast(humanizeError(err), 'error'); }
+            } }, 'Deshacer sustituto')
+          : null,
         el('button', { class: 'btn btn-secondary btn-sm', onclick: async () => {
           const ok = await confirmSheet({ title: '¿No se presentó?', body: 'Se le descuenta la penalización de no-show sobre su puntaje de las últimas 6 noches y se libera su lugar.', confirmLabel: 'Sí, no vino', danger: true });
           if (!ok) return;
@@ -1168,8 +1176,23 @@ function abrirCapturaResultado(m, onChange) {
     saveBtn.disabled = true; saveBtn.textContent = 'Guardando…';
     try {
       if (m.status === 'completed') {
-        await corregirResultadoPartido(m.id, sets, content._nota ? content._nota.value.trim() || null : null, gp);
-        toast('Marcador corregido.', 'success');
+        const res = await corregirResultadoPartido(m.id, sets, content._nota ? content._nota.value.trim() || null : null, gp);
+        handle.close();
+        onChange();
+        // corregir_resultado_partido puede tener efectos en cascada (borra rondas
+        // posteriores, reabre la escalera) — antes ese detalle se descartaba y
+        // recepción solo veía "Marcador corregido.", sin enterarse de que había
+        // que volver a capturar resultados o volver a cerrar la noche.
+        if (res && res.advertencia && (res.rondas_posteriores_borradas > 0 || res.escalera_reabierta || res.cashbacks_revocados > 0)) {
+          const aviso = el('div');
+          aviso.appendChild(el('div', { class: 'sheet-title' }, '⚠️ Corrección con efectos en cascada'));
+          aviso.appendChild(el('p', { class: 'text-muted mb-4' }, res.advertencia));
+          aviso.appendChild(el('button', { class: 'btn btn-primary', onclick: () => avisoHandle.close() }, 'Entendido'));
+          const avisoHandle = openSheet(aviso);
+        } else {
+          toast('Marcador corregido.', 'success');
+        }
+        return;
       } else {
         await registrarResultadoPartido(m.id, sets, gp);
         toast('Marcador guardado.', 'success');

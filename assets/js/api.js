@@ -291,6 +291,16 @@ export async function asignarSustitutoAdmin(registrationId, sustitutoPlayerId, m
   return data;
 }
 
+/** Deshace un sustituto ya asignado (antes de que arranque la noche): el
+ * sustituto se libera y el registro original vuelve a 'confirmed'. No aplica
+ * a sustitutos de coach (ver el mensaje de error de la función). */
+export async function deshacerSustituto(sustitutoRegistrationId) {
+  const { error } = await supabase.rpc('deshacer_sustituto', {
+    p_sustituto_registration_id: sustitutoRegistrationId,
+  });
+  if (error) throw error;
+}
+
 /* ---------------- Retas Abiertas: registro social simple ----------------
    Sin cupo, sin lista de espera, sin puntos ni penalizaciones — solo sirve
    para que todo el club vea quién va y cuántos, y decidir si se anima. */
