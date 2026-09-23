@@ -9,7 +9,9 @@ import {
   responderInvitacionPareja, getJugadoresParaPareja,
   invitarParejaPorCorreo, cancelarInvitacionPareja, cancelarInvitacionCorreo,
   registrarseRetasAbiertas, salirRetasAbiertas, getInscritosRetas,
+  miResultadoNoche,
 } from '../api.js';
+import { generarTarjetaResultadoJugador, compartirTarjeta } from '../vendor/sharecard.js';
 
 const FORMAT_LABEL = { individual: 'Individual', parejas: 'Parejas Fijas', retas_abiertas: 'Retas Abiertas' };
 
@@ -286,6 +288,16 @@ function renderAcciones(f, profile, refresh) {
         yaCerro
           ? 'Esta noche ya se jugó — para cualquier corrección habla con recepción.'
           : 'Esta noche ya está en juego — para cualquier cambio (baja, sustituto) habla con recepción.'));
+      if (yaCerro && f.formato !== 'retas_abiertas') {
+        const btnResultado = el('button', {
+          class: 'btn btn-secondary btn-sm', style: 'display:inline-flex;align-items:center;gap:6px;width:auto;',
+        }, [
+          el('span', { html: icon.share, style: 'width:16px;height:16px;' }),
+          el('span', {}, 'Ver y compartir mi resultado'),
+        ]);
+        btnResultado.addEventListener('click', () => mostrarResultadoNoche(f));
+        acciones.appendChild(btnResultado);
+      }
       return acciones;
     }
 
@@ -441,6 +453,92 @@ async function confirmarBaja(f, refresh) {
     refresh();
   } catch (err) {
     toast(humanizeError(err), 'error');
+  }
+}
+
+/* ============================================================
+   Mi resultado de la noche (personalizado) — solo aparece cuando la
+   noche ya cerró y el jugador de verdad tenía lugar activo esa noche;
+   si nunca jugó (se dio de baja, fue lista de espera que no entró,
+   etc.) el propio backend lo rechaza con un mensaje claro.
+   ============================================================ */
+async function mostrarResultadoNoche(f) {
+  let r;
+  try {
+    r = await miResultadoNoche(f.escalera_id);
+  } catch (err) {
+    toast(humanizeError(err), 'error');
+    return;
+  }
+
+  const content = el('div');
+  content.appendChild(el('div', { class: 'sheet-title' }, 'Tu resultado de la noche'));
+  content.appendChild(el('p', { class: 'text-muted mb-3' },
+    [formatFecha(r.escalera.session_date), FORMAT_LABEL[r.escalera.format] || r.escalera.format,
+      r.escalera.category ? `Categoría ${r.escalera.category}` : null].filter(Boolean).join(' · ')));
+
+  const positivo = Number(r.resumen.puntos_noche) >= 0;
+  content.appendChild(el('div', { class: 'card mb-3', style: 'text-align:center;padding:22px;' }, [
+    el('div', { class: 'h1', style: `margin:0;color:${positivo ? 'var(--cyan)' : 'var(--danger)'};` },
+      `${positivo ? '+' : ''}${Number(r.resumen.puntos_noche).toFixed(0)} pts`),
+    el('p', { class: 'text-muted', style: 'margin:6px 0 0;' },
+      `${r.resumen.partidos_ganados}V - ${r.resumen.partidos_perdidos}D en ${r.resumen.partidos_jugados} partido(s)`),
+    r.ranking ? el('p', { class: 'text-tiny', style: 'margin:4px 0 0;' },
+      `#${r.ranking.posicion} en el ranking de tu categoría`) : null,
+  ].filter(Boolean)));
+
+  if (r.partidos && r.partidos.length) {
+    const lista = el('div', { class: 'stack gap-2 mb-3' });
+    r.partidos.forEach((p) => {
+      lista.appendChild(el('div', { class: 'card', style: 'padding:10px 14px;' }, [
+        el('p', { class: 'text-tiny', style: 'margin:0;' }, `Ronda ${p.ronda} · Cancha ${p.cancha}`),
+        el('p', { style: 'margin:2px 0 0;font-weight:600;' },
+          `${p.gano ? '✅ Ganaste' : '❌ Perdiste'} ${p.games_propios}-${p.games_rival}${p.companero ? ' · con ' + p.companero : ''}`),
+        p.rivales && p.rivales.length
+          ? el('p', { class: 'text-tiny', style: 'margin:2px 0 0;' }, `vs. ${p.rivales.join(' y ')}`)
+          : null,
+      ].filter(Boolean)));
+    });
+    content.appendChild(lista);
+  }
+
+  const btnCompartir = el('button', {
+    class: 'btn btn-primary btn-sm', style: 'display:inline-flex;align-items:center;gap:6px;width:auto;',
+  }, [
+    el('span', { html: icon.share, style: 'width:16px;height:16px;' }),
+    el('span', {}, 'Compartir imagen'),
+  ]);
+  btnCompartir.addEventListener('click', () => compartirResultadoJugador(r, btnCompartir));
+  content.appendChild(btnCompartir);
+
+  openSheet(content);
+}
+
+async function compartirResultadoJugador(r, btn) {
+  const textoOriginal = btn.lastChild.textContent;
+  btn.disabled = true;
+  btn.lastChild.textContent = 'Generando…';
+  try {
+    const canvas = await generarTarjetaResultadoJugador({
+      jugador: r.jugador,
+      companeroFijo: r.companero_fijo,
+      sessionDateLabel: formatFecha(r.escalera.session_date),
+      formatoLabel: FORMAT_LABEL[r.escalera.format] || r.escalera.format,
+      categoryLabel: r.escalera.category ? `Categoría ${r.escalera.category}` : null,
+      resumen: r.resumen,
+      partidos: r.partidos,
+      ranking: r.ranking,
+    });
+    await compartirTarjeta(canvas, {
+      archivo: `mi-resultado-${r.escalera.session_date}.png`,
+      titulo: 'Mi resultado — Escaleras Padel Palmira',
+      texto: `Mi resultado del ${formatFecha(r.escalera.session_date)}`,
+    });
+  } catch (err) {
+    toast(humanizeError(err), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.lastChild.textContent = textoOriginal;
   }
 }
 

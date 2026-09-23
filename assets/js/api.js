@@ -1017,6 +1017,12 @@ export async function podioDeNoche(escaleraId) {
   return data || [];
 }
 
+export async function miResultadoNoche(escaleraId) {
+  const { data, error } = await supabase.rpc('mi_resultado_noche', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return data;
+}
+
 export async function getCampeonesHistoricos() {
   const { data, error } = await supabase.rpc('campeones_historicos');
   if (error) throw error;

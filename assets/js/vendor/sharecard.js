@@ -293,6 +293,131 @@ export async function generarTarjetaLiguilla({ tierLabel, eventDateLabel, result
 }
 
 /* ============================================================
+   4) Mi resultado de la noche — personalizada por jugador. A
+   diferencia de las 3 anteriores (que son el mismo podio/tabla para
+   cualquiera que la comparta), esta se arma distinta para cada
+   jugador: su propio marcador partido por partido, sus puntos de
+   esa noche y, si aplica, su lugar actual en el ranking. Es la que
+   más se va a compartir en redes, así que lleva un poco más de
+   producción visual (marco con brillo en el marcador, acento de
+   color según si la noche fue positiva o no) sin salirse de la
+   misma familia visual de las otras tres tarjetas.
+   ============================================================ */
+export async function generarTarjetaResultadoJugador({
+  jugador, companeroFijo, sessionDateLabel, formatoLabel, categoryLabel, resumen, partidos, ranking,
+}) {
+  const { canvas, ctx } = crearLienzo();
+  await fondoYEncabezado(ctx, {
+    titulo: 'Mi resultado de la noche',
+    subtitulo: [sessionDateLabel, formatoLabel, categoryLabel].filter(Boolean).join(' · '),
+  });
+
+  // Nombre del jugador (y compañero fijo si aplica), debajo del encabezado.
+  ctx.textAlign = 'center';
+  ctx.fillStyle = COLOR.textPrimary;
+  ctx.font = '800 46px ' + FUENTE;
+  const nombreTxt = companeroFijo ? `${jugador} y ${companeroFijo}` : jugador;
+  ctx.fillText(acortar(ctx, nombreTxt || 'Jugador', ANCHO - 160), ANCHO / 2, 600);
+
+  // Hero: puntos ganados esa noche, en grande — con acento de color según si
+  // la noche fue positiva o no (evita celebrar en grande una noche con
+  // penalización neta).
+  const puntos = Number(resumen.puntos_noche) || 0;
+  const positivo = puntos >= 0;
+  ctx.save();
+  redondeado(ctx, 80, 640, ANCHO - 160, 230, 32);
+  const heroGrad = ctx.createLinearGradient(80, 640, ANCHO - 80, 870);
+  heroGrad.addColorStop(0, positivo ? 'rgba(0,242,234,0.16)' : 'rgba(255,0,193,0.12)');
+  heroGrad.addColorStop(1, 'rgba(255,255,255,0.02)');
+  ctx.fillStyle = heroGrad;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = COLOR.border;
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = positivo ? COLOR.cyan : COLOR.pink;
+  ctx.font = '800 110px ' + FUENTE;
+  ctx.fillText(`${positivo ? '+' : ''}${puntos.toFixed(0)}`, ANCHO / 2, 780);
+  ctx.fillStyle = COLOR.textSecondary;
+  ctx.font = '600 32px ' + FUENTE;
+  ctx.fillText('puntos esta noche', ANCHO / 2, 830);
+
+  // Récord ganados-perdidos, justo debajo del hero.
+  ctx.fillStyle = COLOR.textPrimary;
+  ctx.font = '700 38px ' + FUENTE;
+  ctx.fillText(
+    `${resumen.partidos_ganados}V - ${resumen.partidos_perdidos}D  ·  ${resumen.partidos_jugados} partido(s)`,
+    ANCHO / 2, 920,
+  );
+
+  if (ranking && ranking.posicion) {
+    ctx.fillStyle = COLOR.textTertiary;
+    ctx.font = '500 30px ' + FUENTE;
+    ctx.fillText(`#${ranking.posicion} en el ranking de tu categoría`, ANCHO / 2, 965);
+  }
+
+  // Marcador partido por partido, tipo tarjeta de resultados deportivos.
+  let y = 1020;
+  const cardX = 80;
+  const cardW = ANCHO - 160;
+  const alturaCard = 150;
+  const filas = partidos || [];
+  const maxFilas = 4; // una historia no puede crecer sin límite si jugó muchas rondas
+
+  if (!filas.length) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = COLOR.textTertiary;
+    ctx.font = '500 30px ' + FUENTE;
+    ctx.fillText('No se registraron partidos esa noche.', ANCHO / 2, y + 40);
+  }
+
+  filas.slice(0, maxFilas).forEach((p) => {
+    ctx.save();
+    redondeado(ctx, cardX, y, cardW, alturaCard, 22);
+    ctx.fillStyle = COLOR.surface;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = p.gano ? 'rgba(0,242,234,0.35)' : COLOR.border;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = COLOR.textTertiary;
+    ctx.font = '600 26px ' + FUENTE;
+    ctx.fillText(`Ronda ${p.ronda} · Cancha ${p.cancha}`, cardX + 32, y + 44);
+
+    ctx.fillStyle = COLOR.textPrimary;
+    ctx.font = '800 44px ' + FUENTE;
+    ctx.fillText(`${p.games_propios} - ${p.games_rival}`, cardX + 32, y + 100);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = p.gano ? COLOR.cyan : COLOR.textSecondary;
+    ctx.font = '800 32px ' + FUENTE;
+    ctx.fillText(p.gano ? 'GANÓ' : 'PERDIÓ', cardX + cardW - 32, y + 44);
+
+    if (p.rivales && p.rivales.length) {
+      ctx.fillStyle = COLOR.textSecondary;
+      ctx.font = '500 26px ' + FUENTE;
+      ctx.fillText(acortar(ctx, `vs. ${p.rivales.join(' y ')}`, cardW - 64), cardX + cardW - 32, y + 100);
+    }
+
+    y += alturaCard + 22;
+  });
+
+  if (filas.length > maxFilas) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = COLOR.textTertiary;
+    ctx.font = '500 28px ' + FUENTE;
+    ctx.fillText(`+ ${filas.length - maxFilas} partido(s) más`, ANCHO / 2, y + 24);
+  }
+
+  dibujarPie(ctx);
+  return canvas;
+}
+
+/* ============================================================
    Compartir / descargar la tarjeta ya generada.
    ------------------------------------------------------------
    Se intenta primero la Web Share API con archivo (lo que en un celular
