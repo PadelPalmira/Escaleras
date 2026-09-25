@@ -636,9 +636,9 @@ async function renderBracket(evento, profile) {
             p.final_placement === 1 ? el('span', { html: icon.trophy, style: 'width:18px;height:18px;color:var(--cyan);' }) : null,
           ])
         );
-        if (p.wildcard_next_month && soyYo) {
-          list.appendChild(el('p', { class: 'text-tiny mt-1' }, `🎟️ Tienen un lugar garantizado en ${TIER_LABEL[evento.tier] || 'la Liguilla'} el próximo mes.`));
-        }
+        // Nota: wildcard_next_month se guarda en la base de datos pero por
+        // ahora no da ningún beneficio real, así que no se le promete nada al
+        // jugador aquí — mostrarlo sería anunciar un premio que no existe.
       });
     wrap.appendChild(list);
   }

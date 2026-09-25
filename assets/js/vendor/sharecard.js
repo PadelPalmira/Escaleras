@@ -261,14 +261,25 @@ export async function generarTarjetaLiguilla({ tierLabel, eventDateLabel, result
     subtitulo: [tierLabel, eventDateLabel].filter(Boolean).join(' · '),
   });
 
-  let y = 610;
   const cardX = 80;
   const cardW = ANCHO - 160;
-  const alturaCard = 230;
+  const areaTop = 610;
+  const areaBottom = ALTO - 130; // deja espacio para el pie de pagina
+  const n = Math.max(resultados.length, 1);
+  // Con 6 lugares (Liguilla completa) las tarjetas a tamaño fijo de 230px + 32px
+  // de separacion (1540px) ya no cabian en los 1920px del lienzo: el 6to lugar
+  // quedaba totalmente fuera del area visible. Ahora el alto de cada tarjeta y
+  // su separacion se calculan segun cuantos resultados hay que mostrar, con un
+  // minimo legible, en vez de un tamaño fijo pensado solo para 1-4 lugares.
+  const gapCard = n > 4 ? 16 : 32;
+  let alturaCard = Math.floor((areaBottom - areaTop - gapCard * (n - 1)) / n);
+  alturaCard = Math.max(110, Math.min(230, alturaCard));
+  const escala = alturaCard / 230;
+  let y = areaTop;
 
   resultados.forEach((r) => {
     ctx.save();
-    redondeado(ctx, cardX, y, cardW, alturaCard, 28);
+    redondeado(ctx, cardX, y, cardW, alturaCard, 28 * escala);
     ctx.fillStyle = COLOR.surface;
     ctx.fill();
     ctx.lineWidth = 2;
@@ -276,16 +287,17 @@ export async function generarTarjetaLiguilla({ tierLabel, eventDateLabel, result
     ctx.stroke();
     ctx.restore();
 
-    dibujarCirculoIniciales(ctx, cardX + 100, y + alturaCard / 2, 68, `${r.final_placement}º`, 42);
+    dibujarCirculoIniciales(ctx, cardX + 100, y + alturaCard / 2, Math.round(68 * escala), `${r.final_placement}º`, Math.round(42 * escala));
 
     ctx.textAlign = 'left';
     ctx.fillStyle = COLOR.textPrimary;
-    ctx.font = '800 42px ' + FUENTE;
+    ctx.font = `800 ${Math.round(42 * escala)}px ` + FUENTE;
     const maxNombreW = cardW - 260;
-    ctx.fillText(acortar(ctx, r.nombre1, maxNombreW), cardX + 210, y + alturaCard / 2 - 30);
-    ctx.fillText(acortar(ctx, r.nombre2, maxNombreW), cardX + 210, y + alturaCard / 2 + 30);
+    const saltoNombres = Math.round(30 * escala);
+    ctx.fillText(acortar(ctx, r.nombre1, maxNombreW), cardX + 210, y + alturaCard / 2 - saltoNombres);
+    ctx.fillText(acortar(ctx, r.nombre2, maxNombreW), cardX + 210, y + alturaCard / 2 + saltoNombres);
 
-    y += alturaCard + 32;
+    y += alturaCard + gapCard;
   });
 
   dibujarPie(ctx);

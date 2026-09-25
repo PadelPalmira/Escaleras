@@ -306,6 +306,24 @@ export async function asignarSustituto(registrationId, sustitutoPlayerId, esCoac
   return data;
 }
 
+// El sustituto propuesto acepta o rechaza (requiere aceptación desde 1.33 —
+// antes quedaba confirmado de inmediato sin que la persona dijera que sí).
+export async function responderSustituto(registrationId, aceptar) {
+  const { error } = await supabase.rpc('responder_sustituto', {
+    p_registration_id: registrationId,
+    p_aceptar: aceptar,
+  });
+  if (error) throw error;
+}
+
+// Quien propuso al sustituto cancela la invitación mientras sigue pendiente.
+export async function cancelarInvitacionSustituto(registrationId) {
+  const { error } = await supabase.rpc('cancelar_invitacion_sustituto', {
+    p_orig_registration_id: registrationId,
+  });
+  if (error) throw error;
+}
+
 /**
  * Sustituto autorizado por administración, para emergencias reales: entra
  * alguien en el lugar del ausente SIN reparto de puntos y SIN penalización.
@@ -656,20 +674,20 @@ export async function getMultasAdmin({ soloPendientes = false } = {}) {
 }
 
 export async function aplicarSuspension(playerId, startDate, endDate, reason) {
-  const { data, error } = await supabase
-    .from('suspensions')
-    .insert({ player_id: playerId, start_date: startDate, end_date: endDate || null, reason: reason || null })
-    .select().single();
+  // RPC atomica: antes eran dos llamadas sueltas (insert en suspensions +
+  // update en profiles) y si la segunda fallaba quedaba el estado a medias.
+  const { data, error } = await supabase.rpc('suspender_jugador', {
+    p_player_id: playerId, p_start_date: startDate, p_end_date: endDate || null, p_reason: reason || null,
+  });
   if (error) throw error;
-  // Refleja el estado en profiles para que el resto de la app (registro, etc.) lo vea de inmediato.
-  await supabase.from('profiles').update({ status: 'suspended', suspended_until: endDate || null }).eq('id', playerId);
   return data;
 }
 
 export async function levantarSuspension(suspensionId, playerId) {
-  const { error } = await supabase.from('suspensions').update({ lifted_at: ahora().toISOString() }).eq('id', suspensionId);
+  const { error } = await supabase.rpc('levantar_suspension_jugador', {
+    p_suspension_id: suspensionId, p_player_id: playerId,
+  });
   if (error) throw error;
-  await supabase.from('profiles').update({ status: 'active', suspended_until: null }).eq('id', playerId);
 }
 
 export async function getSuspensionesAdmin() {

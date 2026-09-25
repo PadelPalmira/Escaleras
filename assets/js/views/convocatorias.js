@@ -5,7 +5,8 @@ import {
 import { icon } from '../icons.js';
 import {
   getMyProfile, getMisConvocatorias,
-  registrarJugador, cancelarRegistro, previewCancelacion, asignarSustituto,
+  registrarJugador, cancelarRegistro, previewCancelacion, asignarSustituto, responderSustituto,
+  cancelarInvitacionSustituto,
   responderInvitacionPareja, getJugadoresParaPareja,
   invitarParejaPorCorreo, cancelarInvitacionPareja, cancelarInvitacionCorreo,
   registrarseRetasAbiertas, salirRetasAbiertas, getInscritosRetas,
@@ -274,11 +275,18 @@ function renderAcciones(f, profile, refresh) {
   }
 
   if (tengoLugar || enEspera) {
+    if (f.mi_substitute_status === 'pending') {
+      acciones.appendChild(renderInvitacionSustitutoPendiente(f, refresh));
+      return acciones;
+    }
     if (f.mi_partner_status === 'pending' && f.formato === 'parejas') {
       acciones.appendChild(renderInvitacionPendiente(f, refresh));
     }
     if (f.mi_espera_nombre && f.formato === 'parejas') {
       acciones.appendChild(renderEsperandoPareja(f, refresh));
+    }
+    if (tengoLugar && f.mi_sustituto_pendiente_nombre) {
+      acciones.appendChild(renderEsperandoSustituto(f, refresh));
     }
     if (enEspera) {
       const d = f.mi_desglose_lugar;
@@ -383,6 +391,36 @@ function renderAcciones(f, profile, refresh) {
   return acciones;
 }
 
+/* Lo que ve a QUIEN LE PROPUSIERON ser sustituto: no ocupa el lugar todavía
+ * (no cuenta para cupo ni puntos), solo hasta que acepte. */
+function renderInvitacionSustitutoPendiente(f, refresh) {
+  return el('div', { class: 'card', style: 'background:var(--surface-2);' }, [
+    el('p', {}, [
+      el('strong', {}, (f.mi_sustituto_de_nombre || 'Un jugador') + ' te propuso como su sustituto. '),
+      'Si aceptas, tomas su lugar esa noche y los puntos que ganes son tuyos.',
+    ]),
+    el('p', { class: 'text-tiny', style: 'color:var(--warning);' }, textoTiempoRestante(f.mi_sustituto_expira_en)),
+    el('div', { class: 'btn-row mt-3' }, [
+      el('button', {
+        class: 'btn btn-secondary btn-sm',
+        onclick: async (e) => {
+          e.target.disabled = true;
+          try { await responderSustituto(f.mi_registro_id, false); toast('Rechazaste la invitación.', 'info'); refresh(); }
+          catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
+        },
+      }, 'Rechazar'),
+      el('button', {
+        class: 'btn btn-primary btn-sm',
+        onclick: async (e) => {
+          e.target.disabled = true;
+          try { await responderSustituto(f.mi_registro_id, true); toast('¡Listo, ya tienes tu lugar!', 'success'); refresh(); }
+          catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
+        },
+      }, 'Aceptar'),
+    ]),
+  ]);
+}
+
 function renderInvitacionPendiente(f, refresh) {
   return el('div', { class: 'card', style: 'background:var(--surface-2);' }, [
     el('p', {}, [
@@ -438,6 +476,35 @@ function renderEsperandoPareja(f, refresh) {
             if (esCorreo) await cancelarInvitacionCorreo(f.mi_espera_correo_invite_id);
             else await cancelarInvitacionPareja(f.mi_registro_id);
             toast('Invitación cancelada. Puedes invitar a alguien más.', 'success');
+            refresh();
+          } catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
+        },
+      }, 'Cancelar invitación'),
+    ]),
+  ]);
+}
+
+/* Lo que ve QUIEN PROPUSO un sustituto mientras espera respuesta: su lugar
+ * sigue siendo suyo, pero conviene que sepa que la invitación sigue pendiente
+ * (y pueda cancelarla si se equivocó de persona o ya no hace falta). */
+function renderEsperandoSustituto(f, refresh) {
+  return el('div', { class: 'card', style: 'background:var(--surface-2);' }, [
+    el('p', {}, `Le propusiste a ${f.mi_sustituto_pendiente_nombre} ser tu sustituto — todavía no contesta. Tu lugar sigue siendo tuyo mientras tanto.`),
+    el('p', { class: 'text-tiny', style: 'color:var(--warning);' }, textoTiempoRestante(f.mi_sustituto_pendiente_expira_en)),
+    el('div', { class: 'btn-row mt-3' }, [
+      el('button', {
+        class: 'btn btn-danger btn-sm',
+        onclick: async (e) => {
+          const ok = await confirmSheet({
+            title: '¿Cancelar la invitación?',
+            body: '¿Te equivocaste de persona o ya no hace falta? Se cancela y puedes buscar a alguien más.',
+            confirmLabel: 'Sí, cancelar invitación', danger: true,
+          });
+          if (!ok) return;
+          e.target.disabled = true;
+          try {
+            await cancelarInvitacionSustituto(f.mi_registro_id);
+            toast('Invitación cancelada. Puedes buscar a alguien más.', 'success');
             refresh();
           } catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
         },
@@ -656,7 +723,7 @@ async function abrirSelectorSustituto(f, profile, refresh) {
   const content = el('div');
   content.appendChild(el('div', { class: 'sheet-title' }, 'Buscar sustituto'));
   const info = el('p', { class: 'text-muted mb-3' },
-    'Tu sustituto recibe el 34% de los puntos que gane esa noche; tú conservas el 66%. Al dejar sustituto no hay penalización, aunque falten menos de 12 horas.');
+    'Le mandamos una invitación: tu lugar sigue siendo tuyo hasta que la acepte (tiene 1 hora). Tu sustituto recibe el 34% de los puntos que gane esa noche; tú conservas el 66%. Si acepta, no hay penalización aunque falten menos de 12 horas.');
   content.appendChild(info);
 
   const coachToggle = el('button', { class: 'chip-btn mb-3' }, '☐ Es un coach del club cubriendo una emergencia');
@@ -667,8 +734,8 @@ async function abrirSelectorSustituto(f, profile, refresh) {
       ? '☑ Es un coach del club cubriendo una emergencia'
       : '☐ Es un coach del club cubriendo una emergencia';
     info.textContent = esCoach
-      ? 'El coach no gana puntos del club y tú recibes la penalización completa según el tiempo de aviso, igual que si no hubieras conseguido sustituto.'
-      : 'Tu sustituto recibe el 34% de los puntos que gane esa noche; tú conservas el 66%. Al dejar sustituto no hay penalización, aunque falten menos de 12 horas.';
+      ? 'Le mandamos una invitación al coach: en cuanto la acepte, el coach no gana puntos del club y tú recibes la penalización completa según el tiempo de aviso, igual que si no hubieras conseguido sustituto.'
+      : 'Le mandamos una invitación: tu lugar sigue siendo tuyo hasta que la acepte (tiene 1 hora). Tu sustituto recibe el 34% de los puntos que gane esa noche; tú conservas el 66%. Si acepta, no hay penalización aunque falten menos de 12 horas.';
   });
   content.appendChild(coachToggle);
 
@@ -683,7 +750,7 @@ async function abrirSelectorSustituto(f, profile, refresh) {
         e.target.closest('button').disabled = true;
         try {
           await asignarSustituto(f.mi_registro_id, j.id, esCoach);
-          toast(`${j.full_name} jugará en tu lugar.`, 'success');
+          toast(`Le mandamos la invitación a ${j.full_name} — tu lugar es tuyo hasta que la acepte.`, 'success', 5200);
           handle.close();
           refresh();
         } catch (err) { toast(humanizeError(err), 'error'); e.target.closest('button').disabled = false; }
