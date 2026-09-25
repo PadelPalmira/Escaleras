@@ -247,6 +247,22 @@ function renderAcciones(f, profile, refresh) {
   if ((enJuego || yaCerro) && !tengoLugar && !enEspera) {
     acciones.appendChild(el('p', { class: 'text-tiny' },
       yaCerro ? 'Esta noche ya se jugó.' : 'Esta noche ya está en juego — para anotarte de último momento, habla con recepción.'));
+    // Aunque mi_status ya no sea confirmed/substitute (por ejemplo, si me
+    // consiguieron sustituto a media noche y mi registro quedó cancelado),
+    // pude haber jugado partidos reales antes del cambio — mi_resultado_noche
+    // decide con los puntos de verdad, no con este estado, así que se ofrece
+    // el botón siempre que la noche ya cerró y deja que el propio servidor
+    // rechace con un aviso claro a quien de plano no jugó nada esa noche.
+    if (yaCerro && f.formato !== 'retas_abiertas') {
+      const btnResultado = el('button', {
+        class: 'btn btn-secondary btn-sm', style: 'display:inline-flex;align-items:center;gap:6px;width:auto;',
+      }, [
+        el('span', { html: icon.share, style: 'width:16px;height:16px;' }),
+        el('span', {}, 'Ver y compartir mi resultado'),
+      ]);
+      btnResultado.addEventListener('click', () => mostrarResultadoNoche(f));
+      acciones.appendChild(btnResultado);
+    }
     return acciones;
   }
 

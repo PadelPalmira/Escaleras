@@ -5,7 +5,7 @@ import {
   getMiCalificacionLiguilla, getCalificadosConfirmados, getParejasLiguilla, getMiParejaLiguilla,
   getPickActualDraft, getPartidosLiguilla, responderCalificacionLiguilla, hacerPickDraft, responderPickDraft,
   autoprogramarLiguillaMes, getEventoLiguillaDelMes, getLiguillaTablaVivo, getMiCarreraLiguilla,
-  getCampeonesHistoricos, getAjusteNum,
+  getCampeonesHistoricos, getAjusteNum, getLiguillaEventStartTs,
 } from '../api.js';
 import { generarTarjetaLiguilla, compartirTarjeta } from '../vendor/sharecard.js';
 
@@ -372,7 +372,19 @@ async function renderSeccionCalificacion(misCalificacion, evento, onChange) {
     // un botón vivo que de todos modos el backend va a rechazar: antes, el
     // jugador solo se enteraba con un error después de darle clic.
     const cutoffHours = await getAjusteNum('liguilla_cutoff_hours', 24);
-    const inicio = evento.event_date ? new Date(`${evento.event_date}T19:00:00-06:00`) : null;
+    // Antes esto asumía las 19:00 fijas — si la noche real de la Liguilla ya
+    // estaba enlazada con otro horario (por ejemplo, un horario de las 20:00),
+    // el botón podía seguir vivo pasado el corte real, o cerrarse antes de
+    // tiempo, porque el servidor (responder_calificacion_liguilla) sí calcula
+    // con la hora real. Ahora se pide la misma hora exacta que usa el backend.
+    let inicioMs = null;
+    try {
+      const ts = await getLiguillaEventStartTs(evento.id);
+      inicioMs = ts ? new Date(ts).getTime() : null;
+    } catch (err) {
+      console.error('No se pudo obtener la hora real del evento de Liguilla:', err);
+    }
+    const inicio = inicioMs ? new Date(inicioMs) : null;
     const cutoff = inicio ? new Date(inicio.getTime() - cutoffHours * 3600000) : null;
     const esCascada = !!misCalificacion.substitute_for_qualifier_id;
     const ahoraMs = Date.now();

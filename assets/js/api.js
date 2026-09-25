@@ -31,16 +31,24 @@ export async function signOut() {
 export async function getMyProfile() {
   const session = await getSession();
   if (!session) return null;
-  const { data, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+  // Vía RPC (no select directo): telefono/correo/notas de profiles ya no
+  // son legibles por columna para "authenticated" (se cerró una fuga real
+  // donde cualquier jugador podía leerle esos datos a cualquier otro), así
+  // que hasta para leer TU PROPIO perfil hace falta esta función, que
+  // corre con permisos propios y siempre filtra por tu auth.uid().
+  const { data, error } = await supabase.rpc('mi_perfil');
   if (error) throw error;
-  return data;
+  return (data && data[0]) || null;
 }
 
 export async function updateMyProfile(fields) {
   const session = await getSession();
-  const { data, error } = await supabase.from('profiles').update(fields).eq('id', session.user.id).select().single();
+  const { error } = await supabase.from('profiles').update(fields).eq('id', session.user.id);
   if (error) throw error;
-  return data;
+  // El UPDATE no puede devolver la fila directo (mismo motivo que arriba:
+  // el SELECT implícito de .select() chocaría con la columna restringida),
+  // así que se relee con la misma función que getMyProfile.
+  return await getMyProfile();
 }
 
 /**
@@ -160,17 +168,40 @@ export async function getMisRegistros({ soloFuturas = true } = {}) {
 }
 
 export async function getJugadoresParaPareja(escaleraId, excluirPlayerId) {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, full_name, avatar_url')
-    .eq('status', 'active')
-    .eq('role', 'jugador') // Admin/Maestro son recepción/dirección, nunca aparecen como pareja o sustituto disponible.
-    .neq('id', excluirPlayerId)
-    .order('full_name', { ascending: true });
-  if (error) throw error;
+  const [profilesRes, registradosRes] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, full_name, avatar_url')
+      .eq('status', 'active')
+      .eq('role', 'jugador') // Admin/Maestro son recepción/dirección, nunca aparecen como pareja o sustituto disponible.
+      .neq('id', excluirPlayerId)
+      .order('full_name', { ascending: true }),
+    // Quién ya tiene lugar esa noche (como titular O como pareja invitada,
+    // aunque todavía no haya contestado) — antes esto no se consultaba y el
+    // selector ofrecía gente que el propio servidor iba a rechazar con "ya
+    // tiene un registro", incluso ya elegido y confirmado en pantalla.
+    escaleraId
+      ? supabase
+          .from('escalera_registrations')
+          .select('player_id, partner_id')
+          .eq('escalera_id', escaleraId)
+          .in('status', ['confirmed', 'substitute', 'waitlist'])
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (profilesRes.error) throw profilesRes.error;
+  if (registradosRes.error) throw registradosRes.error;
+
+  const yaTienenLugar = new Set();
+  (registradosRes.data || []).forEach((r) => {
+    if (r.player_id) yaTienenLugar.add(r.player_id);
+    if (r.partner_id) yaTienenLugar.add(r.partner_id);
+  });
+
   // Un perfil sin nombre no se puede elegir a ciegas: se ve como
   // "(sin nombre)" en la lista y nadie sabe a quién está escogiendo.
-  return (data || []).filter((j) => (j.full_name || '').trim());
+  return (profilesRes.data || [])
+    .filter((j) => (j.full_name || '').trim())
+    .filter((j) => !yaTienenLugar.has(j.id));
 }
 
 /* ---------------- Acciones (RPC) ---------------- */
@@ -390,6 +421,17 @@ export function tiersElegibles(porCategoria) {
   return tiers;
 }
 
+/** La hora real de arranque del evento (usa el start_time de la escalera ya
+    enlazada si existe; si todavía no hay enlace, cae en las 19:00 por
+    default) — el mismo cálculo exacto que usa el servidor para el corte de
+    24h de responder_calificacion_liguilla, para que la pantalla nunca decida
+    con una hora distinta a la que de verdad va a aplicar el backend. */
+export async function getLiguillaEventStartTs(liguillaEventId) {
+  const { data, error } = await supabase.rpc('liguilla_event_start_ts', { p_liguilla_event_id: liguillaEventId });
+  if (error) throw error;
+  return data; // timestamptz en texto ISO, o null si el evento no tiene fecha.
+}
+
 /** El evento de Liguilla/Ascenso más reciente para alguno de los tiers dados (cualquier estado). */
 export async function getEventoLiguillaActivo(tiers) {
   if (!tiers || tiers.length === 0) return null;
@@ -559,10 +601,14 @@ export function esMaestro(profile) {
     disponible para jugar). Si algún día una pantalla de verdad necesita
     buscar staff, que sea una función aparte, no esta. */
 export async function buscarJugadores(query, limite = 20) {
-  let q = supabase.from('profiles').select('*').eq('role', 'jugador').order('full_name', { ascending: true }).limit(limite);
-  const f = (query || '').trim();
-  if (f) q = q.ilike('full_name', `%${f}%`);
-  const { data, error } = await q;
+  // Vía RPC (no select directo): igual que mi_perfil, esto corre con permisos
+  // propios y valida por su cuenta que quien llama sea admin/maestro — la
+  // búsqueda de jugadores ya no puede hacerse con un select('*') plano
+  // porque telefono/correo/notas de profiles están restringidos por columna.
+  const { data, error } = await supabase.rpc('buscar_jugadores', {
+    p_query: (query || '').trim() || null,
+    p_limite: limite,
+  });
   if (error) throw error;
   return data;
 }
@@ -680,13 +726,15 @@ export async function getConteosRegistros(escaleraIds) {
 }
 
 export async function getRegistrosEscalera(escaleraId) {
-  const { data, error } = await supabase
-    .from('escalera_registrations')
-    .select('*, profiles!escalera_registrations_player_id_fkey(full_name, avatar_url, phone)')
-    .eq('escalera_id', escaleraId)
-    .order('status', { ascending: true });
+  // Vía RPC: es el único lugar del código que necesita el teléfono de OTROS
+  // jugadores (recepción llamando para confirmar) — ya no se puede pedir con
+  // un select directo porque profiles.phone quedó restringido por columna
+  // (ver cerrar_fuga_columnas_via_grant_tabla). La función exige admin/maestro
+  // y regresa exactamente la misma forma que antes (fila + .profiles anidado),
+  // así que no hace falta tocar quien la consume en admin_escaleras.js.
+  const { data, error } = await supabase.rpc('registros_escalera_admin', { p_escalera_id: escaleraId });
   if (error) throw error;
-  return data;
+  return data || [];
 }
 
 // OJO: los alias NUNCA deben llamarse igual que la columna uuid original
@@ -959,7 +1007,9 @@ export async function generarEscalerasSemana(weekStart = null) {
   return data;
 }
 export async function getStaff() {
-  const { data, error } = await supabase.from('profiles').select('*').in('role', ['admin', 'maestro']).order('full_name', { ascending: true });
+  // Vía RPC por el mismo motivo que buscarJugadores: valida admin/maestro en
+  // el servidor y ya no depende de un select('*') plano sobre profiles.
+  const { data, error } = await supabase.rpc('staff_lista');
   if (error) throw error;
   return data;
 }
