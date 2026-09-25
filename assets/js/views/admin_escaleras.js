@@ -141,6 +141,7 @@ const REG_STATUS = {
   cancelled_ontime: { text: 'Cancelado', cls: 'badge-neutral' },
   cancelled_late: { text: 'Cancelado tarde', cls: 'badge-danger' },
   no_show: { text: 'No asistió', cls: 'badge-danger' },
+  sustituto_pendiente: { text: 'Invitado de sustituto (sin contestar)', cls: 'badge-warning' },
 };
 
 export async function renderAdminEscaleras() {

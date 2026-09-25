@@ -18,6 +18,7 @@ const EVENT_STATUS_LABEL = {
   in_progress: { text: 'En juego', cls: 'badge-success' },
   completed: { text: 'Finalizado', cls: 'badge-neutral' },
   cancelled_no_players: { text: 'Cancelado', cls: 'badge-danger' },
+  cancelled: { text: 'No se realizó', cls: 'badge-neutral' },
 };
 const QUALIFIER_STATUS_LABEL = {
   invited: 'Invitado', confirmed: 'Confirmado', waitlist: 'Lista de espera',

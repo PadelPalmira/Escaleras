@@ -19,6 +19,7 @@ const EVENT_STATUS_LABEL = {
   in_progress: { text: 'En juego', cls: 'badge-success' },
   completed: { text: 'Finalizado', cls: 'badge-neutral' },
   cancelled_no_players: { text: 'Cancelado', cls: 'badge-danger' },
+  cancelled: { text: 'No se realizó', cls: 'badge-neutral' },
 };
 const QUALIFIER_STATUS_LABEL = {
   invited: 'Invitado — pendiente de confirmar',
@@ -234,6 +235,8 @@ async function renderCuerpoTier(tier, profile, onChange) {
     wrap.appendChild(await renderSeccionDraft(evento, profile, misCalificacion, onChange));
   } else if (evento.status === 'confirmed' || evento.status === 'in_progress' || evento.status === 'completed') {
     wrap.appendChild(await renderBracket(evento, profile));
+  } else if (evento.status === 'cancelled') {
+    wrap.appendChild(el('div', { class: 'card' }, el('p', { class: 'text-muted' }, 'Esta edición no se realizó. La siguiente se programa sola al arrancar el mes.')));
   } else if (evento.status === 'cancelled_no_players') {
     wrap.appendChild(el('div', { class: 'card' }, el('p', { class: 'text-muted' }, 'Esta edición no se pudo realizar por falta de jugadores.')));
     wrap.appendChild(await renderBracket(evento, profile));
@@ -258,7 +261,9 @@ async function renderCarreraDelMes(tier, eventoMes, profile, onChange) {
       titulo,
     ]),
   ]));
-  if (eventoMes && eventoMes.event_date) {
+  if (eventoMes && eventoMes.status === 'cancelled') {
+    hero.appendChild(el('p', { class: 'text-muted mt-2' }, 'Este mes no se juega la Liguilla. La siguiente se programa sola al arrancar el mes.'));
+  } else if (eventoMes && eventoMes.event_date) {
     hero.appendChild(el('p', { class: 'mt-2', style: 'font-weight:700;font-size:15px;' }, formatFecha(eventoMes.event_date)));
     hero.appendChild(el('p', { class: 'text-tiny mt-1' }, diasRestantes(eventoMes.event_date)));
   } else {

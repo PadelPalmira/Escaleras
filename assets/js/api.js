@@ -1132,7 +1132,9 @@ export async function getNotificacionesUrgentes(playerId, limite = 3) {
     .in('type', ['promocion_lista_espera', 'escalera_cancelada', 'invitacion_pareja',
                  'confirmacion_requerida', 'sustituto_encontrado', 'cambio_categoria',
                  'privilegio_perdido', 'pareja_cancelada', 'pareja_vencida', 'multa_aplicada', 'suspension',
-                 'suspension_levantada', 'cambio_en_cancha'])
+                 'suspension_levantada', 'cambio_en_cancha',
+                 // 1.34: invitación de sustituto (tiene 1 hora para contestar) y sus respuestas.
+                 'sustituto_propuesta', 'sustituto_rechazado', 'sustituto_vencido', 'penalizacion_baja_admin'])
     .order('created_at', { ascending: false })
     .limit(limite);
   if (error) throw error;

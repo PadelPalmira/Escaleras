@@ -19,6 +19,7 @@ const NOTIF_URGENT = new Set([
   // Fase 6 — cosas que cambian el lugar del jugador y no puede enterarse tarde.
   'privilegio_perdido', 'preferencia_expirada', 'promocion_lista_espera',
   'pareja_cancelada', 'escalera_cancelada', 'invitacion_pareja', 'pareja_vencida',
+  'sustituto_propuesta', 'sustituto_rechazado', 'sustituto_vencido', 'penalizacion_baja_admin',
 ]);
 
 const REASON_LABEL = {

@@ -197,7 +197,7 @@ async function renderInicioJugador(profile) {
     const tiers = tiersElegibles(porCategoria);
     for (const tier of tiers) {
       const evento = await getEventoLiguillaActivo([tier]);
-      if (!evento || ['completed', 'cancelled_no_players'].includes(evento.status)) continue;
+      if (!evento || ['completed', 'cancelled_no_players', 'cancelled'].includes(evento.status)) continue;
       const miCalificacion = await getMiCalificacionLiguilla(evento.id, profile.id);
       if (!miCalificacion) continue;
       const titulo = tier === 'liguilla_a' ? 'Liguilla' : 'Liguilla Categoría B';

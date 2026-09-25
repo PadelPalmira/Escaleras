@@ -32,9 +32,10 @@ const STATUS_LABEL = {
   cancelled_ontime: { text: 'Te diste de baja', cls: 'badge-neutral' },
   cancelled_late: { text: 'Baja tardía', cls: 'badge-danger' },
   no_show: { text: 'No asististe', cls: 'badge-danger' },
+  sustituto_pendiente: { text: 'Te propusieron de sustituto', cls: 'badge-warning' },
 };
 
-const ACTIVO = ['confirmed', 'substitute', 'waitlist'];
+const ACTIVO = ['confirmed', 'substitute', 'waitlist', 'sustituto_pendiente'];
 
 /* Toda invitación de pareja (a alguien registrado o por correo) tiene
  * exactamente 1 hora para confirmarse — si se cumple, se libera sola. Este
@@ -167,6 +168,16 @@ function renderTarjeta(f, profile, refresh, avisoArriba) {
     return card;
   }
 
+  // La noche de la Liguilla del mes reemplaza a la escalera normal de ese
+  // día: no hay registro aquí (los calificados se manejan en su pestaña).
+  if (f.es_liguilla) {
+    card.appendChild(el('div', { class: 'aviso aviso-info mt-3' }, [
+      el('strong', {}, 'Esta noche se juega la Liguilla del mes. '),
+      'No hay escalera normal ese día. Si calificaste, todo se maneja desde la pestaña Liguilla.',
+    ]));
+    return card;
+  }
+
   card.appendChild(renderCupo(f));
 
   const banner = renderBannerVentana(f, avisoArriba);
@@ -270,15 +281,18 @@ function renderAcciones(f, profile, refresh) {
   // Ya conseguí sustituto: ya no tengo lugar, pero sí una historia que contar.
   if (!tengoLugar && !enEspera && f.mi_sustituto_nombre) {
     acciones.appendChild(el('div', { class: 'aviso aviso-ok' },
-      `${f.mi_sustituto_nombre} juega en tu lugar. No tienes penalización.`));
+      `${f.mi_sustituto_nombre} juega en tu lugar esta noche.`));
+    return acciones;
+  }
+
+  // Me propusieron como sustituto y todavía no contesto: no ocupo lugar ni
+  // estoy en la lista de espera (tiene su propio estado), solo decido.
+  if (f.mi_status === 'sustituto_pendiente' && f.mi_substitute_status === 'pending') {
+    acciones.appendChild(renderInvitacionSustitutoPendiente(f, refresh));
     return acciones;
   }
 
   if (tengoLugar || enEspera) {
-    if (f.mi_substitute_status === 'pending') {
-      acciones.appendChild(renderInvitacionSustitutoPendiente(f, refresh));
-      return acciones;
-    }
     if (f.mi_partner_status === 'pending' && f.formato === 'parejas') {
       acciones.appendChild(renderInvitacionPendiente(f, refresh));
     }

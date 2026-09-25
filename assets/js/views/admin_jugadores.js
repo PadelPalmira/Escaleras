@@ -12,6 +12,7 @@ const REG_STATUS = {
   confirmed: { text: 'Confirmado', cls: 'badge-success' },
   waitlist: { text: 'Lista de espera', cls: 'badge-warning' },
   substitute: { text: 'Sustituto', cls: 'badge-success' },
+  sustituto_pendiente: { text: 'Invitado de sustituto', cls: 'badge-warning' },
 };
 const FINE_STATUS = { pending: { text: 'Pendiente', cls: 'badge-warning' }, paid: { text: 'Pagada', cls: 'badge-success' }, waived: { text: 'Condonada', cls: 'badge-neutral' } };
 const CASHBACK_STATUS = {
