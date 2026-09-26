@@ -1256,6 +1256,24 @@ function construirSets(eq1, eq2) {
   return [{ team1: n1, team2: n2 }];
 }
 
+/* Los tres caminos para cubrir un lugar desde recepción. "Normal" y "coach"
+   mandan una INVITACIÓN (el sustituto tiene 1 hora para aceptar desde su app,
+   igual que cuando la manda el propio jugador); "emergencia" lo mete directo. */
+const MODOS_SUSTITUTO = [
+  {
+    key: 'normal', etiqueta: 'Reparto normal (66% / 34%)',
+    info: 'Se le manda la invitación al sustituto y tiene 1 hora para aceptarla desde su app; mientras tanto el lugar sigue siendo del titular. Si acepta, recibe el 34% de los puntos ganados y el ausente conserva el 66%, sin penalización.',
+  },
+  {
+    key: 'coach', etiqueta: 'Coach del club cubriendo',
+    info: 'Se le manda la invitación al coach (1 hora para aceptar). El coach no acumula puntos y al ausente esa noche no le cuenta; si se bajó tarde y nadie más iba a tomar su lugar, la penalización por tiempo sí se le aplica.',
+  },
+  {
+    key: 'emergencia', etiqueta: 'Emergencia autorizada — sin reparto',
+    info: 'Para emergencias reales (médicas, etc.). Entra directo, sin invitación. El sustituto se lleva el 100% de lo que gane porque sí jugó, y al ausente esa noche no le cuenta: cero puntos y cero penalización. Es el único modo que funciona en Parejas Fijas, para que su compañero no se quede sin jugar.',
+  },
+];
+
 function abrirSustituto(registro, onChange, formato) {
   const content = el('div');
   content.appendChild(el('div', { class: 'sheet-title' }, 'Asignar sustituto'));
@@ -1313,7 +1331,7 @@ function abrirSustituto(registro, onChange, formato) {
             toast(`${j.full_name} juega en su lugar, sin reparto de puntos ni penalización.`, 'success', 5200);
           } else {
             await asignarSustituto(registro.id, j.id, modo === 'coach');
-            toast(`${j.full_name} jugará en su lugar.`, 'success');
+            toast(`Invitación enviada a ${j.full_name}: tiene 1 hora para aceptarla desde su app.`, 'success', 5200);
           }
           handle.close();
           onChange();

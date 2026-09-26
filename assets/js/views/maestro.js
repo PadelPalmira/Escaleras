@@ -1,4 +1,4 @@
-import { el, formatHora, toast, humanizeError, confirmSheet, avatarContent, chipJugador, todayISO } from '../utils.js';
+import { el, formatHora, formatFecha, toast, humanizeError, confirmSheet, avatarContent, chipJugador, todayISO } from '../utils.js';
 import {
   getMyProfile, esMaestro,
   getSystemSettingsAll, updateSystemSetting, getWeekdayScheduleAll, updateWeekdaySchedule,
@@ -353,7 +353,7 @@ async function pintarConvocatorias(box) {
       if (i > 0) card.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
       card.appendChild(el('div', { class: 'row-between' }, [
         el('div', {}, [
-          el('div', { style: 'font-weight:600;' }, `${WEEKDAY_LABEL[e.weekday_schedule?.weekday] || ''} ${e.session_date}`),
+          el('div', { style: 'font-weight:600;' }, formatFecha(e.session_date)),
           el('div', { class: 'text-tiny' }, e.weekday_schedule ? `${FORMAT_LABEL[e.weekday_schedule.format] || e.weekday_schedule.format}${e.weekday_schedule.category ? ' · Cat ' + e.weekday_schedule.category : ''}` : ''),
         ]),
       ]));

@@ -230,7 +230,12 @@ async function renderCuerpoTier(tier, profile, onChange) {
   }
 
   if (evento.status === 'scheduled' || evento.status === 'qualifying') {
-    wrap.appendChild(await renderSeccionCalificacion(misCalificacion, evento, onChange));
+    // Mientras el mes sigue corriendo (scheduled) todavía no se invita a
+    // nadie: decir "No calificaste" ahí se lo decía a TODOS, hasta al #1,
+    // durante todo el mes. La carrera de arriba ya explica cómo va cada quien.
+    if (evento.status === 'qualifying' || misCalificacion) {
+      wrap.appendChild(await renderSeccionCalificacion(misCalificacion, evento, onChange));
+    }
   } else if (evento.status === 'draft_open') {
     wrap.appendChild(await renderSeccionDraft(evento, profile, misCalificacion, onChange));
   } else if (evento.status === 'confirmed' || evento.status === 'in_progress' || evento.status === 'completed') {

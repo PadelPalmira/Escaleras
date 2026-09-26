@@ -268,7 +268,10 @@ async function renderInicioAdmin(profile) {
   if (!deHoy.length) {
     wrap.appendChild(el('div', { class: 'card' }, [
       el('div', { class: 'h2' }, 'Hoy no hay escalera'),
-      el('p', { class: 'text-muted mt-2' }, 'Los viernes son Retas Abiertas: se cobran en recepción y no se capturan aquí.'),
+      el('p', { class: 'text-muted mt-2' },
+        escaleras.some((e) => e.session_date === hoy && e.weekday_schedule && e.weekday_schedule.format === 'retas_abiertas' && e.status !== 'cancelled')
+          ? 'Hoy son Retas Abiertas: se cobran en recepción y no se capturan aquí.'
+          : 'Hoy no hay ninguna noche programada.'),
     ]));
   } else {
     deHoy.forEach((e) => wrap.appendChild(tarjetaAdmin(e, conteos[e.id], true)));

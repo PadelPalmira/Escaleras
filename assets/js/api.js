@@ -985,10 +985,14 @@ export async function getWeekdayScheduleAll() {
   // escaleras(count) llega como [{ count: N }] — lo aplanamos a un número para
   // que la pantalla decida ahí mismo si un horario se puede borrar (nunca
   // generó convocatorias) o solo desactivar (ya tiene historial que conservar).
+  // weekday es texto ('lunes', 'martes'…): ordenado por la base sale en orden
+  // alfabético (jueves primero). Aquí se acomoda en el orden de la semana.
+  const ORDEN_DIA = { lunes: 1, martes: 2, miercoles: 3, jueves: 4, viernes: 5, sabado: 6, domingo: 7 };
   return (data || []).map((ws) => {
     const { escaleras, ...resto } = ws;
     return { ...resto, escaleras_generadas: escaleras?.[0]?.count ?? 0 };
-  });
+  }).sort((a, b) => (ORDEN_DIA[a.weekday] || 9) - (ORDEN_DIA[b.weekday] || 9)
+    || String(a.start_time || '').localeCompare(String(b.start_time || '')));
 }
 export async function updateWeekdaySchedule(id, fields) {
   const { error } = await supabase.from('weekday_schedule').update(fields).eq('id', id);

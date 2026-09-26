@@ -220,7 +220,10 @@ export async function generarTarjetaRanking({ categoryLabel, filas }) {
   let y = 630;
   const cardX = 80;
   const cardW = ANCHO - 160;
-  const alturaFila = 150;
+  // Con 8 filas de 150 px la última se salía del lienzo y tapaba el pie:
+  // la altura se ajusta para que todas quepan arriba del pie.
+  const espacio = (ALTO - 150) - y;
+  const alturaFila = Math.min(150, Math.floor(espacio / Math.max(filas.length, 1)) - 20);
 
   filas.forEach((f) => {
     ctx.save();

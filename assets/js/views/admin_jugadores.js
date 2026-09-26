@@ -289,9 +289,14 @@ async function abrirSustituto(registro, jugador, formato, onChange) {
       list.appendChild(chipJugador(j, async (e) => {
         e.target.closest('button').disabled = true;
         try {
-          if (esParejas) await asignarSustitutoAdmin(registro.id, j.id, 'Emergencia — ficha de jugador');
-          else await asignarSustituto(registro.id, j.id, esCoach);
-          toast(`${j.full_name} jugará en su lugar.`, 'success'); handle.close(); onChange();
+          if (esParejas) {
+            await asignarSustitutoAdmin(registro.id, j.id, 'Emergencia — ficha de jugador');
+            toast(`${j.full_name} jugará en su lugar.`, 'success');
+          } else {
+            await asignarSustituto(registro.id, j.id, esCoach);
+            toast(`Invitación enviada a ${j.full_name}: tiene 1 hora para aceptarla desde su app.`, 'success', 5200);
+          }
+          handle.close(); onChange();
         }
         catch (err) { toast(humanizeError(err), 'error'); e.target.closest('button').disabled = false; }
       }));

@@ -371,17 +371,27 @@ function renderAcciones(f, profile, refresh) {
   const puedeApartar = f.ventana_cerrada || f.tengo_ventaja;
   const aListaEspera = !puedeApartar || !hayLugar;
 
+  // Domingo sin ventaja de ranking: el registro entra a la mezcla 60/40 y el
+  // servidor te acomoda al momento en los lugares abiertos (9-12) si te
+  // alcanza, o en la lista de espera si no. Mientras queden lugares abiertos
+  // el botón no debe decir "lista de espera", porque lo normal es que entres.
+  const cap = f.capacidad || 12;
+  const reservados = f.lugares_reservados != null ? f.lugares_reservados : cap;
+  const libresAbiertos = (cap - reservados) - Math.max((f.ocupados || 0) - (f.ocupados_privilegio || 0), 0);
+  const necesita = f.formato === 'parejas' ? 2 : 1;
+  const entraAbiertos = aListaEspera && hayLugar && f.ventana_abierta && !f.tengo_ventaja && libresAbiertos >= necesita;
+
   let etiqueta;
   if (f.formato === 'parejas') {
-    etiqueta = aListaEspera ? 'Anotarnos a la lista de espera' : 'Registrarme con pareja';
+    etiqueta = aListaEspera && !entraAbiertos ? 'Anotarnos a la lista de espera' : 'Registrarme con pareja';
   } else {
-    etiqueta = aListaEspera ? 'Anotarme a la lista de espera' : (f.tengo_ventaja && f.ventana_abierta ? 'Apartar mi lugar' : 'Anotarme');
+    etiqueta = aListaEspera && !entraAbiertos ? 'Anotarme a la lista de espera' : (f.tengo_ventaja && f.ventana_abierta ? 'Apartar mi lugar' : 'Anotarme');
   }
 
-  const btn = el('button', { class: `btn ${aListaEspera ? 'btn-secondary' : 'btn-primary'}` }, etiqueta);
+  const btn = el('button', { class: `btn ${aListaEspera && !entraAbiertos ? 'btn-secondary' : 'btn-primary'}` }, etiqueta);
   btn.addEventListener('click', async () => {
     if (f.formato === 'parejas') {
-      abrirSelectorPareja(f, profile, aListaEspera, refresh);
+      abrirSelectorPareja(f, profile, aListaEspera, refresh, entraAbiertos);
       return;
     }
     btn.disabled = true;
@@ -398,7 +408,10 @@ function renderAcciones(f, profile, refresh) {
   });
   acciones.appendChild(btn);
 
-  if (aListaEspera && f.ventana_abierta && !f.tengo_ventaja) {
+  if (entraAbiertos) {
+    acciones.appendChild(el('p', { class: 'text-tiny', style: 'color:var(--text-tertiary);' },
+      'Al anotarte, la app te acomoda al momento con la mezcla 60% puntos / 40% rapidez: si te alcanza, entras a uno de los lugares abiertos; si no, quedas en la lista de espera.'));
+  } else if (aListaEspera && f.ventana_abierta && !f.tengo_ventaja) {
     acciones.appendChild(el('p', { class: 'text-tiny', style: 'color:var(--text-tertiary);' },
       'Entrar a la lista no te cuesta nada y no es automático: si no la pides, no te formas.'));
   }
@@ -642,7 +655,7 @@ async function compartirResultadoJugador(r, btn) {
 /* ============================================================
    Selector de pareja
    ============================================================ */
-async function abrirSelectorPareja(f, profile, aListaEspera, refresh) {
+async function abrirSelectorPareja(f, profile, aListaEspera, refresh, entraAbiertos = false) {
   let jugadores;
   try {
     jugadores = await getJugadoresParaPareja(f.escalera_id, profile.id);
@@ -653,7 +666,9 @@ async function abrirSelectorPareja(f, profile, aListaEspera, refresh) {
   const content = el('div');
   content.appendChild(el('div', { class: 'sheet-title' }, 'Elige a tu pareja'));
   content.appendChild(el('p', { class: 'text-muted mb-3' },
-    aListaEspera
+    entraAbiertos
+      ? 'La app los acomoda al momento con la mezcla 60% puntos / 40% rapidez: si les alcanza, entran a los lugares abiertos; si no, quedan juntos en la lista de espera.'
+      : aListaEspera
       ? 'Van a quedar juntos en la lista de espera. Si se libera un lugar entran los dos.'
       : f.ventana_abierta
         ? 'Su lugar será provisional hasta las 6:00 pm del domingo: las parejas se ordenan por el promedio de puntos de los dos.'

@@ -78,7 +78,7 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
       render: () => Promise.resolve(slideCard(
         icon.clock,
         'Así funciona una noche',
-        ['Lunes a viernes, 8:00–10:00pm, en las 3 canchas del club.', 'Dentro de esas 2 horas se juegan varias rondas de 15 minutos, rotando de cancha y de rival — casi nadie repite el mismo cruce dos veces en la misma noche.']
+        ['Lunes a jueves de 8:00 a 10:00 pm, y los viernes Retas Abiertas de 7:00 a 11:00 pm, en las 3 canchas del club.', 'Dentro de esas 2 horas se juegan varias rondas de 15 minutos, rotando de cancha y de rival — casi nadie repite el mismo cruce dos veces en la misma noche.']
       )),
     });
 
@@ -88,7 +88,8 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
         'Convocatorias justas — esto es lo nuevo',
         [
           esNuevo ? 'Así nos aseguramos que sea parejo para todos:' : 'Esto es justo lo que cambió respecto a antes:',
-          '• Si el cupo se llena, la lista de espera se ordena por tu puntaje — ya no por quién se anotó primero.',
+          '• El domingo, de 10:00 am a 6:00 pm, 8 de los 12 lugares se apartan para el top del ranking de esa categoría; los otros 4 (y la lista de espera) se reparten 60% por puntos y 40% por qué tan rápido te anotaste.',
+          '• Después de las 6:00 pm, lo que quede es por orden de llegada.',
           '• La cancha 1 se sortea al azar en la primera ronda de cada noche — nadie empieza con ventaja.',
           '• Después, subes o bajas de cancha según ganes o pierdas cada ronda — nadie se queda fijo toda la noche.',
         ]
@@ -99,7 +100,7 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
       render: () => Promise.resolve(slideCard(
         icon.coin,
         'Tus puntos, categoría por categoría',
-        ['Ganas puntos por cada game y por ganar el partido — y más si juegas en cancha 1.', 'A y B llevan su propio ranking, cada uno con tu PROMEDIO de puntos por noche de tus últimas 6 escaleras ahí. No hay ascenso ni descenso automático: tú eliges cada semana en cuál anotarte.', 'El detalle completo con todas las cifras está siempre en la pestaña Reglas.']
+        ['Ganas puntos por cada game y por ganar el partido — y más si juegas en cancha 1.', 'A y B llevan su propio ranking, cada uno con tu PROMEDIO de puntos por noche de tus últimas 6 escaleras ahí. No hay ascenso ni descenso automático: tú eliges cada semana en cuál anotarte.', 'Los mejores de cada noche se llevan cashback para usar en el club. El detalle completo con todas las cifras está en Perfil → Reglamento completo.']
       )),
     });
 
@@ -196,11 +197,11 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
     card.appendChild(el('div', { class: 'guia-icon' }, [el('span', { html: icon.book })]));
     card.appendChild(el('div', { class: 'h2 mt-4 mb-3' }, 'Un tour rapidísimo'));
     const items = [
-      [icon.home, 'Inicio', 'tu próxima sesión y tu resumen del momento.'],
+      [icon.home, 'Inicio', 'tus avisos, tu próxima sesión y tu ronda en vivo.'],
       [icon.ranking, 'Ranking', 'tu lugar en A y en B, y el de todo el club.'],
-      [icon.calendar, 'Convocatorias', 'confirma tu lugar, busca sustituto o cancela.'],
-      [icon.book, 'Reglas', 'el reglamento completo, siempre a la mano.'],
-      [icon.user, 'Perfil', 'tu historial, multas y notificaciones.'],
+      [icon.calendar, 'Convocatorias', 'anótate, busca sustituto o date de baja — y ve tu resultado de cada noche.'],
+      [icon.trophy, 'Liguilla', 'la fecha del mes y cómo vas para calificar.'],
+      [icon.user, 'Perfil', 'tus cashbacks, tu historial, avisos y el reglamento completo.'],
     ];
     const list = el('div', { class: 'stack gap-3 mt-1' });
     items.forEach(([ic, titulo, desc]) => {

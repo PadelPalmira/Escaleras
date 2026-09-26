@@ -441,7 +441,7 @@ function abrirCapturaLiguilla(m, nombrePareja, onChange) {
         ronda2_en_curso: 'Resultado guardado — faltan más partidos de Ronda 2.',
         final_generada: '¡Ronda 2 completa! Se generó la Final.',
         pendiente_consolacion_5_6: 'Final registrada — falta el partido de 5º-6º lugar para cerrar la edición.',
-        liguilla_finalizada: '¡Liguilla finalizada! Resultados y wildcard asignados.',
+        liguilla_finalizada: '¡Liguilla finalizada! Resultados guardados.',
       };
       toast(mensajes[res.siguiente_paso] || 'Resultado guardado.', 'success');
       handle.close();
