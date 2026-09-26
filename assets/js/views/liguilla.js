@@ -1,4 +1,4 @@
-import { el, formatFecha, avatarContent, toast, humanizeError, confirmSheet, ahora } from '../utils.js';
+import { el, formatFecha, formatFechaHora, avatarContent, toast, humanizeError, confirmSheet, ahora } from '../utils.js';
 import { icon } from '../icons.js';
 import {
   getMyProfile, getMiSituacionCategorias, tiersElegibles, getEventoLiguillaActivo,
@@ -275,7 +275,7 @@ async function renderCarreraDelMes(tier, eventoMes, profile, onChange) {
     hero.appendChild(el('p', { class: 'text-muted mt-2' }, 'La fecha de este mes se publica en cuanto arranque el mes.'));
   }
   hero.appendChild(el('p', { class: 'text-tiny mt-3', style: 'color:var(--text-tertiary);' },
-    'Califican los 12 mejores del ranking de tu categoría al cierre del mes.'));
+    'Califican los 12 mejores del ranking de tu categoría (con 3+ noches). La app genera la lista sola en cuanto termina la última noche de la categoría antes de la Liguilla, y te avisa si calificaste.'));
   wrap.appendChild(hero);
 
   // Mi situación personal.
@@ -464,7 +464,7 @@ async function renderSeccionDraft(evento, profile, misCalificacion, onChange) {
   if (pick.status === 'offered' && pick.picked_player_id === profile.id) {
     const card = el('div', { class: 'card' }, [
       el('p', { style: 'font-weight:600;' }, `${pick.picker?.full_name || 'Alguien'} te eligió como pareja.`),
-      el('p', { class: 'text-muted mt-2 mb-4' }, 'Puedes aceptar o buscar que te toque con alguien más.'),
+      el('p', { class: 'text-muted mt-2 mb-4' }, `Puedes aceptar o buscar que te toque con alguien más.${pick.expires_at ? ` Contesta antes del ${formatFechaHora(pick.expires_at)}: si no, se toma como rechazo.` : ''}`),
     ]);
     const row = el('div', { class: 'btn-row' });
     const btnNo = el('button', { class: 'btn btn-secondary' }, 'Rechazar');
@@ -486,7 +486,11 @@ async function renderSeccionDraft(evento, profile, misCalificacion, onChange) {
   }
 
   if (pick.status === 'pending' && pick.picker_player_id === profile.id) {
-    wrap.appendChild(el('div', { class: 'card mb-3' }, el('p', { style: 'font-weight:600;' }, 'Te toca elegir pareja.')));
+    wrap.appendChild(el('div', { class: 'card mb-3' }, [
+      el('p', { style: 'font-weight:600;' }, 'Te toca elegir pareja.'),
+      pick.expires_at ? el('p', { class: 'text-tiny mt-1' },
+        `Tienes hasta el ${formatFechaHora(pick.expires_at)} para elegir. Si no eliges, tu turno pasa al siguiente: alguien más te puede elegir, y si no, te toca con quien quede libre.`) : null,
+    ]));
     const [confirmados, parejas] = await Promise.all([getCalificadosConfirmados(evento.id), getParejasLiguilla(evento.id)]);
     const idsConPareja = new Set(parejas.flatMap((p) => [p.player1_id, p.player2_id]));
     const disponibles = confirmados.filter((c) => c.player_id !== profile.id && !idsConPareja.has(c.player_id));
@@ -515,7 +519,8 @@ async function renderSeccionDraft(evento, profile, misCalificacion, onChange) {
     wrap.appendChild(el('div', { class: 'card' }, el('p', { class: 'text-muted' }, `${pick.picker?.full_name || 'Alguien'} eligió a ${pick.picked?.full_name || 'alguien'} — esperando su respuesta.`)));
     return wrap;
   }
-  wrap.appendChild(el('div', { class: 'card' }, el('p', { class: 'text-muted' }, `Le toca elegir a ${pick.picker?.full_name || 'otro jugador'}.`)));
+  wrap.appendChild(el('div', { class: 'card' }, el('p', { class: 'text-muted' },
+    `Le toca elegir a ${pick.picker?.full_name || 'otro jugador'}${pick.expires_at ? ` (tiene hasta el ${formatFechaHora(pick.expires_at)})` : ''}.`)));
   return wrap;
 }
 

@@ -1,4 +1,4 @@
-import { el, todayISO, formatFecha, formatHora, avatarContent, toast, humanizeError } from '../utils.js';
+import { el, todayISO, formatFecha, formatFechaHora, formatHora, avatarContent, toast, humanizeError } from '../utils.js';
 import { icon } from '../icons.js';
 import {
   getMyProfile, getMiSituacionCategorias, getMisRegistros, tiersElegibles,
@@ -6,6 +6,7 @@ import {
   esAdminOMaestro, esMaestro, getEscalerasAdmin, getConteosRegistros,
   getMiRondaActual, horaServidor,
   getNotificacionesUrgentes, marcarNotificacionLeida,
+  getLiguillaEventosAdmin, getCalificadosLiguillaAdmin, getParejasLiguilla, getLiguillaEventStartTs,
 } from '../api.js';
 import { navigate } from '../router.js';
 import { abrirNoche } from './admin_escaleras.js';
@@ -309,6 +310,12 @@ async function renderInicioAdmin(profile) {
       'Si una noche no llega a su cupo, no hay escalera: se cancela. Puedes agregar gente tú mismo desde la noche.'));
   }
 
+  /* ---------- Liguilla del mes: la app la lleva sola, recepción la monitorea ---------- */
+  try {
+    const bloque = await renderMonitorLiguilla();
+    if (bloque) wrap.appendChild(bloque);
+  } catch (err) { console.error('No se pudo cargar el monitor de Liguilla:', err); }
+
   /* ---------- accesos ---------- */
   wrap.appendChild(el('div', { class: 'section-title' }, 'Otras cosas'));
   const accesos = el('div', { class: 'card' });
@@ -434,4 +441,65 @@ function renderMiRonda(r, desfaseMs = 0) {
       'Ya está capturado el marcador de esta ronda. Espera a que recepción arme la siguiente.'));
   }
   return card;
+}
+
+
+/* La Liguilla corre sola (calificados, confirmaciones, draft, cuadro). Aquí
+   recepción solo ve en qué va cada una y qué le toca vigilar. */
+const LIG_NOMBRE = { liguilla_a: 'Liguilla · Categoría A', ascenso_b: 'Liguilla Categoría B' };
+async function renderMonitorLiguilla() {
+  const eventos = await getLiguillaEventosAdmin();
+  const mes = todayISO().slice(0, 7);
+  const activos = (eventos || []).filter((ev) =>
+    ['qualifying', 'draft_open', 'confirmed', 'in_progress'].includes(ev.status)
+    || (ev.status === 'scheduled' && ev.event_date && ev.event_date.slice(0, 7) === mes));
+  if (!activos.length) return null;
+  activos.sort((a, b) => String(a.event_date).localeCompare(String(b.event_date)));
+
+  const box = el('div');
+  box.appendChild(el('div', { class: 'section-title' }, 'Liguilla del mes'));
+  const card = el('div', { class: 'card' });
+  for (let i = 0; i < activos.length; i++) {
+    const ev = activos[i];
+    let badge = { text: 'Programada', cls: 'badge-neutral' };
+    let detalle = '';
+    if (ev.status === 'scheduled') {
+      detalle = `Se juega el ${formatFecha(ev.event_date)}. Los calificados salen solos al cerrar la última noche de la categoría.`;
+    } else if (ev.status === 'qualifying') {
+      const cal = await getCalificadosLiguillaAdmin(ev.id);
+      const conf = cal.filter((c) => c.status === 'confirmed').length;
+      const pend = cal.filter((c) => c.status === 'invited').length;
+      let corte = '';
+      try {
+        const inicio = await getLiguillaEventStartTs(ev.id);
+        if (inicio) corte = ` El plazo cierra el ${formatFechaHora(new Date(new Date(inicio).getTime() - 24 * 3600e3).toISOString())}`;
+      } catch { /* sin fecha de corte */ }
+      badge = { text: `${conf}/12 confirmados`, cls: conf >= 12 ? 'badge-success' : 'badge-warning' };
+      detalle = pend > 0
+        ? `Faltan ${pend} por confirmar: recuérdales que lo hagan en su app.${corte}`
+        : (conf < 12 ? 'Ya no queda nadie por invitar: busca sustitutos o ciérrala.' : 'Arrancando el draft.');
+    } else if (ev.status === 'draft_open') {
+      const parejas = await getParejasLiguilla(ev.id);
+      badge = { text: `Draft ${parejas.length}/6`, cls: 'badge-warning' };
+      detalle = 'Los jugadores están eligiendo pareja. La app salta a quien no elige a tiempo.';
+    } else if (ev.status === 'confirmed') {
+      badge = { text: 'Parejas listas', cls: 'badge-success' };
+      detalle = 'El cuadro se publica solo 3 horas antes del evento.';
+    } else if (ev.status === 'in_progress') {
+      badge = { text: 'En juego', cls: 'badge-success' };
+      detalle = 'Captura los resultados desde Liguilla del mes.';
+    }
+    if (i > 0) card.appendChild(el('hr', { class: 'sep', style: 'margin:12px 0;' }));
+    card.appendChild(el('div', { class: 'fila-enlace', onclick: () => navigate('/admin/liguilla') }, [
+      el('div', { style: 'width:100%;' }, [
+        el('div', { class: 'row-between', style: 'gap:10px;' }, [
+          el('div', { style: 'font-weight:700;font-size:14.5px;' }, LIG_NOMBRE[ev.tier] || ev.tier),
+          el('span', { class: `badge ${badge.cls}`, style: 'white-space:nowrap;' }, badge.text),
+        ]),
+        el('div', { class: 'text-tiny mt-1' }, detalle),
+      ]),
+    ]));
+  }
+  box.appendChild(card);
+  return box;
 }

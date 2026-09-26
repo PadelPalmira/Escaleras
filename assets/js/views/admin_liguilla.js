@@ -132,13 +132,27 @@ async function cargarDetalle(wrap, eventId) {
     el('p', { class: 'text-muted mt-2' }, `${ev.month_key}${ev.event_date ? ' · ' + formatFecha(ev.event_date) : ''}`),
   ]));
 
+  const AUTO_TXT = {
+    scheduled: 'La app genera los calificados sola en cuanto se cierra la última noche de esta categoría antes de la Liguilla, y les avisa a todos. No tienes que hacer nada.',
+    qualifying: 'La app ya invitó a los 12. Tu trabajo: que confirmen en su app. Al corte de 24 h la app cierra sola las confirmaciones, pasa los lugares a la lista de espera y, con 12 confirmados, arranca el draft. Si no se juntan 12, busca sustitutos aquí o ciérrala.',
+    draft_open: 'La app lleva los turnos sola: quien no elige en su plazo se salta, y si al final quedan jugadores sin pareja, se emparejan solos. A 2 horas del evento se completan las parejas que falten.',
+    confirmed: 'Parejas listas. El cuadro (Ronda 1) se publica solo 3 horas antes del evento; los resultados los capturas tú esa noche.',
+    in_progress: 'Captura los resultados conforme se juegan: la app arma sola la Ronda 2, la Final y el resultado final.',
+  };
+  if (AUTO_TXT[ev.status]) {
+    wrap.appendChild(el('div', { class: 'aviso aviso-info mb-4' }, [
+      el('strong', {}, 'Automático. '), AUTO_TXT[ev.status],
+      ev.status !== 'in_progress' ? el('div', { class: 'text-tiny mt-2' }, 'Los botones de abajo son solo para corregir algo a mano.') : null,
+    ]));
+  }
+
   if (ev.status === 'scheduled' || ev.status === 'qualifying') {
     wrap.appendChild(renderReprogramarFecha(ev, refresh));
   }
 
   if (ev.status === 'scheduled') {
     wrap.appendChild(el('div', { class: 'card' }, [
-      el('p', { class: 'text-muted mb-3' }, 'Invita a los primeros 12 lugares del ranking de este tier (más lista de espera).'),
+      el('p', { class: 'text-muted mb-3' }, 'Solo si necesitas adelantarla: invita ya a los 12 primeros del ranking en vivo (más lista de espera), aunque falte la última noche.'),
       el('button', { class: 'btn btn-primary', onclick: async (e) => {
         e.target.disabled = true; e.target.textContent = 'Generando…';
         try { const r = await generarCalificadosLiguilla(eventId, 8); toast(`${r.calificados} invitados, ${r.en_espera} en espera.`, 'success'); refresh(); }
@@ -175,7 +189,7 @@ async function cargarDetalle(wrap, eventId) {
     wrap.appendChild(list);
 
     wrap.appendChild(el('div', { class: 'card mt-4' }, [
-      el('p', { class: 'text-muted mb-3' }, 'Cierra la confirmación para pasar al draft. Si aún no se alcanza el corte de 24h, puedes forzarlo.'),
+      el('p', { class: 'text-muted mb-3' }, 'Esto lo hace la app sola al corte de 24 h. Úsalo solo si quieres adelantar el cierre.'),
       el('div', { class: 'btn-row' }, [
         el('button', { class: 'btn btn-secondary', onclick: (e) => cerrarConf(eventId, false, refresh, e.target) }, 'Cerrar confirmaciones'),
         el('button', { class: 'btn btn-secondary', onclick: (e) => cerrarConf(eventId, true, refresh, e.target) }, 'Forzar cierre ahora'),
@@ -189,7 +203,8 @@ async function cargarDetalle(wrap, eventId) {
     const [pick, parejas] = await Promise.all([getPickActualDraft(eventId), getParejasLiguilla(eventId)]);
     if (pick) {
       const texto = pick.status === 'pending'
-        ? `Le toca elegir a ${pick.picker?.full_name || '—'}.`
+        ? `Le toca elegir a ${pick.picker?.full_name || '—'}` +
+          (pick.expires_at ? ` (tiene hasta el ${formatFechaHora(pick.expires_at)}; si no, la app salta su turno).` : '.')
         : `${pick.picker?.full_name || '—'} ofreció pareja a ${pick.picked?.full_name || '—'} — esperando respuesta` +
           (pick.expires_at ? ` (se vence sola el ${formatFechaHora(pick.expires_at)}).` : '.');
       const card = el('div', { class: 'card' }, [el('p', {}, texto)]);
@@ -223,7 +238,7 @@ async function cargarDetalle(wrap, eventId) {
       wrap.appendChild(list);
     }
     wrap.appendChild(el('div', { class: 'card mt-4' }, [
-      el('p', { class: 'text-muted mb-3' }, 'Si el draft se atora, puedes emparejar automáticamente a los jugadores restantes por nivel (normalmente disponible 2h antes del evento).'),
+      el('p', { class: 'text-muted mb-3' }, 'La app lo hace sola 2 h antes del evento. Si quieres adelantarlo, empareja ya a los jugadores que falten, por nivel.'),
       el('div', { class: 'btn-row' }, [
         el('button', { class: 'btn btn-secondary', onclick: (e) => autogenerar(eventId, false, refresh, e.target) }, 'Autogenerar restantes'),
         el('button', { class: 'btn btn-secondary', onclick: (e) => autogenerar(eventId, true, refresh, e.target) }, 'Forzar ahora'),
