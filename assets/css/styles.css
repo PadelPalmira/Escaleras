@@ -329,6 +329,20 @@ textarea.input{ height: auto; padding: var(--sp-3) var(--sp-4); resize: vertical
 .list-row .meta{ font-size: 12.5px; color: var(--text-tertiary); }
 .list-row .value{ margin-left: auto; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 
+/* Admin → Jugadores: lista completa alfabética con filtro en vivo */
+[hidden]{ display: none !important; }
+.jug-letra{
+  font-size: 12px; font-weight: 800; letter-spacing: 0.06em; color: var(--cyan);
+  padding: var(--sp-3) 0 var(--sp-1); border-bottom: 1px solid var(--border);
+}
+.jug-row{
+  width: 100%; background: none; border: none; border-bottom: 1px solid var(--border);
+  text-align: left; border-radius: 0; transition: background var(--t-fast);
+}
+.jug-row:active{ background: var(--surface-hover); }
+.jug-row-txt{ display: flex; flex-direction: column; min-width: 0; }
+.jug-row-txt .name, .jug-row-txt .meta{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------- Empty / loading states ---------- */
 .empty-state{
   text-align: center; padding: var(--sp-9) var(--sp-5);

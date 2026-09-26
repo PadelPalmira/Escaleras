@@ -22,6 +22,22 @@ const CASHBACK_STATUS = {
   usado: { text: 'Usado', cls: 'badge-neutral' },
 };
 
+// Lo último que se escribió en el buscador, para que al volver de una ficha
+// la lista quede filtrada igual que como se dejó.
+let ultimoFiltro = '';
+
+// Minúsculas y sin acentos/diéresis ("José Ñúñez" → "jose nunez"), para que
+// buscar "jose" encuentre a "José" y "nunez" a "Núñez".
+function normalizar(txt) {
+  return (txt || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+// Letra con la que se agrupa a un jugador en la lista (A, B, C… / #).
+function letraDe(nombre) {
+  const c = normalizar(nombre).charAt(0).toUpperCase();
+  return /[A-Z]/.test(c) ? c : '#';
+}
+
 export async function renderAdminJugadores() {
   const profile = await getMyProfile();
   if (!esAdminOMaestro(profile)) {
@@ -29,37 +45,99 @@ export async function renderAdminJugadores() {
   }
   const wrap = el('div');
   wrap.appendChild(el('div', { class: 'h1 mb-2' }, 'Jugadores'));
-  wrap.appendChild(el('p', { class: 'text-muted mb-4' }, 'Busca a un jugador para asignar sustituto, aplicar una multa o una suspensión.'));
+  wrap.appendChild(el('p', { class: 'text-muted mb-4' }, 'Toca a un jugador para asignar sustituto, aplicar una multa o una suspensión.'));
 
-  const search = el('input', { class: 'input mb-4', type: 'text', placeholder: 'Buscar jugador por nombre…' });
+  const search = el('input', { class: 'input mb-2', type: 'search', placeholder: 'Buscar jugador por nombre…', autocomplete: 'off' });
+  search.value = ultimoFiltro;
   wrap.appendChild(search);
-  const resultsBox = el('div');
-  wrap.appendChild(resultsBox);
+  const contador = el('p', { class: 'text-tiny mb-3' }, '');
+  wrap.appendChild(contador);
+  const listBox = el('div');
+  listBox.appendChild(el('div', { class: 'stack', style: 'padding-top:30px;' }, [el('div', { class: 'spinner' })]));
+  wrap.appendChild(listBox);
 
-  let t;
-  search.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => pintarResultados(resultsBox, search.value, wrap), 200); });
+  let jugadores;
+  try {
+    jugadores = await buscarJugadores(null, 5000);
+  } catch (err) {
+    listBox.innerHTML = '';
+    listBox.appendChild(el('div', { class: 'stack' }, [
+      el('p', { class: 'text-muted' }, humanizeError(err)),
+      el('button', { class: 'btn btn-secondary', onclick: () => renderAdminJugadores().then((n) => wrap.replaceWith(n)) }, 'Reintentar'),
+    ]));
+    return wrap;
+  }
+
+  // Orden alfabético en español (ignora mayúsculas y acentos; la Ñ va después de la N).
+  jugadores = (jugadores || []).slice().sort((a, b) => {
+    const an = (a.full_name || '').trim(), bn = (b.full_name || '').trim();
+    if (!an !== !bn) return an ? -1 : 1; // los que no tienen nombre, al final
+    return an.localeCompare(bn, 'es', { sensitivity: 'base' });
+  });
+
+  listBox.innerHTML = '';
+  if (jugadores.length === 0) {
+    listBox.appendChild(el('div', { class: 'card' }, el('p', { class: 'text-muted' }, 'Todavía no hay jugadores registrados.')));
+    contador.textContent = '';
+    return wrap;
+  }
+
+  // Se pinta la lista completa una sola vez; al escribir solo se ocultan/muestran
+  // filas, así el filtro es instantáneo aunque haya cientos de jugadores.
+  const grupos = [];
+  let grupoActual = null;
+  const card = el('div', { class: 'card', style: 'padding-top:6px;padding-bottom:6px;' });
+  jugadores.forEach((j) => {
+    const letra = letraDe(j.full_name);
+    if (!grupoActual || grupoActual.letra !== letra) {
+      const header = el('div', { class: 'jug-letra' }, letra);
+      grupoActual = { letra, header, filas: [] };
+      grupos.push(grupoActual);
+      card.appendChild(header);
+    }
+    const estado = j.status === 'suspended' ? 'Suspendido' : (j.status && j.status !== 'active' ? 'Inactivo' : null);
+    const fila = el('button', { class: 'list-row jug-row', type: 'button', onclick: () => { ultimoFiltro = search.value; pintarFicha(wrap, j); } }, [
+      el('span', { class: 'avatar' }, avatarContent(j)),
+      el('span', { class: 'jug-row-txt' }, [
+        el('span', { class: 'name' }, j.full_name || '(sin nombre)'),
+        j.email ? el('span', { class: 'meta' }, j.email) : null,
+      ]),
+      estado ? el('span', { class: 'badge badge-warning', style: 'margin-left:auto;' }, estado) : null,
+    ]);
+    grupoActual.filas.push({ fila, palabras: normalizar(j.full_name).split(/[\s.\-']+/).filter(Boolean) });
+    card.appendChild(fila);
+  });
+  listBox.appendChild(card);
+  const sinResultados = el('div', { class: 'card', hidden: true }, el('p', { class: 'text-muted' }, 'Ningún jugador coincide con tu búsqueda.'));
+  listBox.appendChild(sinResultados);
+
+  const total = jugadores.length;
+  const aplicarFiltro = () => {
+    const q = normalizar(search.value);
+    // Como en los contactos del celular: cada palabra que escribas tiene que
+    // ser el inicio de alguna palabra del nombre, en cualquier orden.
+    // "ma" deja a Manuel, Mario, Mauricio…; "gar ana" encuentra a "Ana García".
+    const palabras = q.split(/\s+/).filter(Boolean);
+    let visibles = 0;
+    grupos.forEach((g) => {
+      let enGrupo = 0;
+      g.filas.forEach((f) => {
+        const ok = palabras.every((p) => f.palabras.some((w) => w.startsWith(p)));
+        f.fila.hidden = !ok;
+        if (ok) { enGrupo++; visibles++; }
+      });
+      g.header.hidden = enGrupo === 0;
+    });
+    card.hidden = visibles === 0;
+    sinResultados.hidden = visibles !== 0;
+    contador.textContent = palabras.length
+      ? `${visibles} de ${total} jugador${total === 1 ? '' : 'es'}`
+      : `${total} jugador${total === 1 ? '' : 'es'}`;
+  };
+  search.addEventListener('input', () => { ultimoFiltro = search.value; aplicarFiltro(); });
+  aplicarFiltro();
 
   return wrap;
-}
-
-async function pintarResultados(box, filtro, wrap) {
-  if (!filtro.trim()) { box.innerHTML = ''; return; }
-  box.innerHTML = '<p class="text-tiny">Buscando…</p>';
-  const jugadores = await buscarJugadores(filtro, 15);
-  box.innerHTML = '';
-  if (jugadores.length === 0) { box.appendChild(el('p', { class: 'text-muted' }, 'Sin resultados.')); return; }
-  const list = el('div', { class: 'card' });
-  jugadores.forEach((j, i) => {
-    if (i > 0) list.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
-    list.appendChild(el('button', {
-      class: 'chip-btn chip-jugador', style: 'width:100%;',
-      onclick: () => pintarFicha(wrap, j),
-    }, [
-      el('span', { class: 'avatar-mini' }, avatarContent(j)),
-      el('span', {}, `${j.full_name || '(sin nombre)'}${j.status !== 'active' ? '  ·  ' + (j.status === 'suspended' ? 'Suspendido' : 'Inactivo') : ''}`),
-    ]));
-  });
-  box.appendChild(list);
 }
 
 async function pintarFicha(wrap, jugador) {

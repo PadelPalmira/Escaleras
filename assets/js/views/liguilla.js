@@ -182,7 +182,7 @@ async function renderCuerpoTier(tier, profile, onChange) {
   const wrap = el('div');
 
   // La Liguilla del mes se programa sola: la fecha sale del horario semanal
-  // (siempre la última noche de Parejas Fijas del mes de esa categoría), así
+  // (la última jornada del mes de esa categoría: A lunes o miércoles, B martes o jueves), así
   // que el jugador la ve desde el primer día del mes aunque las
   // convocatorias de esa semana todavía no existan.
   let eventoMes = null;
