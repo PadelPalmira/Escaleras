@@ -1151,3 +1151,55 @@ export async function marcarNotificacionLeida(notifId) {
   const { error } = await supabase.from('notifications').update({ read_at: ahora().toISOString() }).eq('id', notifId);
   if (error) throw error;
 }
+
+/* =====================================================================
+   Deployment 2.0
+   ===================================================================== */
+
+/* ¿El jugador va calificado a la Liguilla de este mes? Se usa para el
+   brillo dorado del icono de la barra de abajo. Cuesta poco a propósito:
+   se llama una vez al abrir la app y al cambiar de pestaña no se repite. */
+export async function voyCalificadoLiguilla(playerId = null) {
+  const { data, error } = await supabase.rpc('voy_calificado_liguilla', { p_player_id: playerId });
+  if (error) throw error;
+  return data === true;
+}
+
+/* Quiénes van a una noche. Cualquier jugador la puede ver: trae nombre y
+   foto, nunca teléfono ni correo. Los de lista de espera vienen al final,
+   en su orden real de la fila. */
+export async function getInscritosEscalera(escaleraId) {
+  const { data, error } = await supabase.rpc('inscritos_escalera', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return data || [];
+}
+
+/* Recepción/maestro corrigen los datos de un jugador. El correo no se toca:
+   es la llave con la que entra a la app. */
+export async function adminActualizarJugador(playerId, { fullName, phone, declaredLevel = null, status = null }) {
+  const { error } = await supabase.rpc('admin_actualizar_jugador', {
+    p_player_id: playerId,
+    p_full_name: fullName,
+    p_phone: phone,
+    p_declared_level: declaredLevel,
+    p_status: status,
+  });
+  if (error) throw error;
+}
+
+/* ¿Este jugador ya tiene historial en el club? Decide si al darlo de baja
+   se borra de verdad o solo se archiva — la pantalla lo avisa antes. */
+export async function jugadorTieneHistorial(playerId) {
+  const { data, error } = await supabase.rpc('jugador_tiene_historial', { p_player_id: playerId });
+  if (error) throw error;
+  return data === true;
+}
+
+/* Da de baja a un jugador: lo borra de verdad si nunca jugó, o lo archiva
+   si ya tiene historial (para no romperle las noches a los demás). En los
+   dos casos primero le libera las noches futuras. */
+export async function adminEliminarJugador(playerId) {
+  const { data, error } = await supabase.rpc('admin_eliminar_jugador', { p_player_id: playerId });
+  if (error) throw error;
+  return data || {};
+}

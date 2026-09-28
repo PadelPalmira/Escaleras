@@ -48,6 +48,10 @@
   --cat-limite: #ffb84d;
   --cat-limite-dim: rgba(255, 184, 77, 0.14);
 
+  /* --- Oro: "vas calificado a la Liguilla" --- */
+  --oro: #ffc43d;
+  --oro-claro: #ffd984;
+
   /* --- Tipografía --- */
   --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
@@ -206,6 +210,21 @@ span:has(> svg) > svg{ width: 100%; height: 100%; display: block; }
 .bottom-nav-compact .nav-item{ font-size: 9px; letter-spacing: -0.02em; gap: 2px; }
 .bottom-nav-compact .nav-item svg{ width: 20px; height: 20px; }
 .nav-item svg{ width: 22px; height: 22px; stroke: currentColor; transition: transform var(--t-fast); }
+
+/* Vas calificado a la Liguilla: el trofeo se pone dorado y respira muy
+   despacio. Discreto a propósito — se tiene que notar sin competir con la
+   pestaña activa ni con el punto rojo de avisos. */
+.nav-item.calificado{ color: var(--oro); }
+.nav-item.calificado svg{ animation: brillo-oro 2.8s ease-in-out infinite; }
+.nav-item.calificado.active{ color: var(--oro-claro); }
+@keyframes brillo-oro{
+  0%, 100% { filter: drop-shadow(0 0 3px rgba(255, 196, 61, 0.35)); }
+  50%      { filter: drop-shadow(0 0 8px rgba(255, 196, 61, 0.80)); }
+}
+@media (prefers-reduced-motion: reduce){
+  .nav-item.calificado svg{ animation: none; filter: drop-shadow(0 0 5px rgba(255, 196, 61, 0.55)); }
+}
+
 .nav-item.active{ color: var(--text-primary); }
 .nav-item.active svg{ transform: translateY(-1px); }
 .nav-item.active::before{
@@ -328,6 +347,11 @@ textarea.input{ height: auto; padding: var(--sp-3) var(--sp-4); resize: vertical
 .list-row .name{ font-weight: 600; font-size: 14.5px; }
 .list-row .meta{ font-size: 12.5px; color: var(--text-tertiary); }
 .list-row .value{ margin-left: auto; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Noche cancelada: la tarjeta se queda a la vista pero apagada, para que se
+   entienda de un vistazo que ya no va — antes simplemente desaparecía. */
+.card-cancelada{ opacity: 0.72; }
+.card-cancelada .name, .card-cancelada .h2{ text-decoration: line-through; }
 
 /* Admin → Jugadores: lista completa alfabética con filtro en vivo */
 [hidden]{ display: none !important; }

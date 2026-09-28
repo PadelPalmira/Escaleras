@@ -1,6 +1,6 @@
 import {
   el, formatFecha, formatHora, formatFechaHora, toast, humanizeError, openSheet, confirmSheet, chipJugador,
-  mailtoLinkInvitarPareja, minutosRestantes,
+  mailtoLinkInvitarPareja, minutosRestantes, avatarContent,
 } from '../utils.js';
 import { icon } from '../icons.js';
 import {
@@ -10,7 +10,7 @@ import {
   responderInvitacionPareja, getJugadoresParaPareja,
   invitarParejaPorCorreo, cancelarInvitacionPareja, cancelarInvitacionCorreo,
   registrarseRetasAbiertas, salirRetasAbiertas, getInscritosRetas,
-  miResultadoNoche,
+  miResultadoNoche, getInscritosEscalera,
 } from '../api.js';
 import { generarTarjetaResultadoJugador, compartirTarjeta } from '../vendor/sharecard.js';
 
@@ -163,8 +163,21 @@ function renderTarjeta(f, profile, refresh, avisoArriba) {
 
   card.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' }, FORMAT_HINT[f.formato]));
 
+  // Noche cancelada: antes simplemente desaparecía de la lista y el jugador
+  // se quedaba sin saber si seguía en pie. Ahora se queda a la vista, con su
+  // motivo, hasta que pasa el día.
+  if (f.esc_status === 'cancelled') {
+    card.classList.add('card-cancelada');
+    card.appendChild(el('div', { class: 'aviso aviso-danger mt-3' }, [
+      el('strong', {}, 'Esta noche se canceló. '),
+      'Nadie recibe penalización ni pierde puntos. Si te habías anotado, tu lugar ya se liberó solo.',
+    ]));
+    return card;
+  }
+
   if (f.formato === 'retas_abiertas') {
     card.appendChild(renderRetas(f, profile, refresh));
+    card.appendChild(renderQuienesVan(f));
     return card;
   }
 
@@ -179,12 +192,92 @@ function renderTarjeta(f, profile, refresh, avisoArriba) {
   }
 
   card.appendChild(renderCupo(f));
+  card.appendChild(renderQuienesVan(f));
 
   const banner = renderBannerVentana(f, avisoArriba);
   if (banner) card.appendChild(banner);
 
   card.appendChild(renderAcciones(f, profile, refresh));
   return card;
+}
+
+/* ============================================================
+   "¿Quiénes van?"
+   ------------------------------------------------------------
+   Se carga solo cuando lo abres, no al pintar la pestaña: si no,
+   cada vez que alguien entra a Convocatorias se dispararían 5 o 6
+   consultas de golpe para listas que casi nadie despliega.
+   A propósito solo trae nombre y foto — nunca teléfono ni correo,
+   aunque quien lo abra sea recepción.
+   ============================================================ */
+function renderQuienesVan(f) {
+  const box = el('div', { class: 'mt-3' });
+  const total = (f.ocupados || 0) + (f.en_espera || 0);
+  if (total === 0) {
+    box.appendChild(el('p', { class: 'text-tiny', style: 'color:var(--text-tertiary);' },
+      'Todavía no se anota nadie — sé el primero.'));
+    return box;
+  }
+
+  const lista = el('div', { style: 'display:none;' });
+  const etiqueta = () => (lista.style.display === 'none'
+    ? `Ver quiénes van (${f.ocupados}${f.en_espera ? ' + ' + f.en_espera + ' en espera' : ''})`
+    : 'Ocultar la lista');
+  const btn = el('button', {
+    class: 'btn btn-ghost btn-sm',
+    style: 'width:auto;padding-left:0;font-weight:700;color:var(--cyan);',
+  }, etiqueta());
+
+  let cargado = false;
+  btn.addEventListener('click', async () => {
+    if (lista.style.display !== 'none') { lista.style.display = 'none'; btn.textContent = etiqueta(); return; }
+    lista.style.display = 'block';
+    btn.textContent = etiqueta();
+    if (cargado) return;
+    lista.innerHTML = '';
+    lista.appendChild(el('p', { class: 'text-tiny' }, 'Cargando…'));
+    try {
+      const gente = await getInscritosEscalera(f.escalera_id);
+      cargado = true;
+      lista.innerHTML = '';
+      const dentro = gente.filter((g) => g.status !== 'waitlist');
+      const espera = gente.filter((g) => g.status === 'waitlist');
+
+      if (dentro.length === 0) {
+        lista.appendChild(el('p', { class: 'text-tiny' }, 'Nadie con lugar confirmado todavía.'));
+      }
+      dentro.forEach((g, i) => lista.appendChild(filaJugador(g, i + 1, f)));
+
+      if (espera.length > 0) {
+        lista.appendChild(el('div', { class: 'text-tiny mt-3', style: 'font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);' },
+          `Lista de espera (${espera.length})`));
+        lista.appendChild(el('p', { class: 'text-tiny', style: 'color:var(--text-tertiary);' },
+          'Si alguien se da de baja, entran en este orden.'));
+        espera.forEach((g, i) => lista.appendChild(filaJugador(g, g.posicion_espera || i + 1, f, true)));
+      }
+    } catch (err) {
+      lista.innerHTML = '';
+      lista.appendChild(el('p', { class: 'text-tiny', style: 'color:var(--danger);' }, humanizeError(err)));
+    }
+  });
+
+  box.appendChild(btn);
+  box.appendChild(lista);
+  return box;
+}
+
+function filaJugador(g, num, f, esEspera = false) {
+  const etiquetas = [];
+  if (g.status === 'substitute') etiquetas.push(g.sustituye_a ? `sustituto de ${g.sustituye_a}` : 'sustituto');
+  if (f.formato === 'parejas' && g.partner_nombre) etiquetas.push(`con ${g.partner_nombre}`);
+  return el('div', { class: 'list-row' }, [
+    el('span', { class: 'rank', style: esEspera ? 'color:var(--warning);' : '' }, String(num)),
+    el('span', { class: 'avatar' }, avatarContent(g)),
+    el('div', { style: 'min-width:0;' }, [
+      el('div', { class: 'name' }, g.full_name),
+      etiquetas.length ? el('div', { class: 'meta' }, etiquetas.join(' · ')) : null,
+    ]),
+  ]);
 }
 
 function renderCupo(f) {

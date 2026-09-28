@@ -1,6 +1,8 @@
 import { el, todayISO, formatFecha, formatFechaHora, toast, humanizeError, openSheet, confirmSheet, avatarContent, chipJugador } from '../utils.js';
+import { NIVELES } from '../niveles.js';
 import {
   getMyProfile, esAdminOMaestro, buscarJugadores,
+  adminActualizarJugador, adminEliminarJugador, jugadorTieneHistorial,
   getRegistrosActivosDeJugador, asignarSustituto, asignarSustitutoAdmin, marcarNoShow, cancelarRegistro,
   aplicarMulta, marcarMultaEstado, getMisMultas,
   aplicarSuspension, levantarSuspension, getMisSuspensiones,
@@ -155,18 +157,161 @@ async function pintarFicha(wrap, jugador) {
   }
 }
 
+function nombreNivel(valor) {
+  const n = NIVELES.find((x) => x.value === valor);
+  return n ? `Nivel ${n.label}` : '';
+}
+
+/* ============================================================
+   Editar los datos de un jugador.
+   ------------------------------------------------------------
+   El correo NO se edita: es la llave con la que entra a la app
+   (enlace mágico), así que cambiarlo aquí lo dejaría sin cuenta.
+   Suspender/levantar suspensión tampoco están aquí, porque tienen
+   su propio flujo más abajo — ese además le libera las noches.
+   ============================================================ */
+function abrirEditarJugador(jugador, refresh) {
+  const nombre = el('input', { class: 'input', type: 'text', value: jugador.full_name || '', placeholder: 'Nombre y apellido' });
+  const celular = el('input', { class: 'input', type: 'tel', value: jugador.phone || '', placeholder: '10 dígitos' });
+  const nivel = el('select', { class: 'input' }, [
+    el('option', { value: '' }, 'Sin nivel declarado'),
+    ...NIVELES.map((n) => el('option', { value: n.value }, n.label)),
+  ]);
+  nivel.value = jugador.declared_level || '';
+  const archivado = el('select', { class: 'input' }, [
+    el('option', { value: 'active' }, 'Activo — juega normal'),
+    el('option', { value: 'inactive' }, 'Archivado — no aparece ni se puede anotar'),
+  ]);
+  archivado.value = jugador.status === 'inactive' ? 'inactive' : 'active';
+
+  const content = el('div', {}, [
+    el('div', { class: 'sheet-title' }, 'Editar datos'),
+    el('p', { class: 'text-tiny mb-3' }, `Correo de acceso: ${jugador.email || '—'} (ese no se puede cambiar desde aquí).`),
+    el('div', { class: 'field' }, [el('label', {}, 'Nombre completo'), nombre]),
+    el('div', { class: 'field' }, [el('label', {}, 'Celular'), celular]),
+    el('div', { class: 'field' }, [el('label', {}, 'Nivel de juego'), nivel]),
+    jugador.status === 'suspended'
+      ? el('p', { class: 'text-tiny mb-3' }, 'Está suspendido: para cambiarle el estado, levanta primero la suspensión desde su ficha.')
+      : el('div', { class: 'field' }, [el('label', {}, 'Estado'), archivado]),
+  ]);
+
+  const btn = el('button', { class: 'btn btn-primary mt-2' }, 'Guardar cambios');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+      await adminActualizarJugador(jugador.id, {
+        fullName: nombre.value,
+        phone: celular.value,
+        declaredLevel: nivel.value || null,
+        status: jugador.status === 'suspended' ? null : archivado.value,
+      });
+      toast('Datos actualizados.', 'success');
+      handle.close();
+      // La ficha se repinta con los datos nuevos sin salir de la pantalla.
+      Object.assign(jugador, {
+        full_name: nombre.value.trim(),
+        phone: celular.value.replace(/\D/g, ''),
+        declared_level: nivel.value || jugador.declared_level,
+        status: jugador.status === 'suspended' ? jugador.status : archivado.value,
+      });
+      refresh();
+    } catch (err) {
+      toast(humanizeError(err), 'error');
+      btn.disabled = false; btn.textContent = 'Guardar cambios';
+    }
+  });
+  content.appendChild(btn);
+  content.appendChild(el('button', { class: 'btn btn-ghost mt-2', onclick: () => handle.close() }, 'Cerrar'));
+  const handle = openSheet(content);
+}
+
+/* ============================================================
+   Dar de baja a un jugador.
+   ------------------------------------------------------------
+   Antes de preguntar nada, la app revisa si ya tiene historial en
+   el club, porque eso cambia por completo lo que va a pasar:
+   - Sin historial (típico: registro a medias o cuenta duplicada)
+     se borra de verdad, con todo y su acceso.
+   - Con historial se archiva: sale de rankings, buscadores y
+     listas, pero sus partidos y los de sus rivales quedan intactos.
+     Borrarlo de verdad dejaría huecos en noches ya jugadas.
+   En los dos casos se le liberan primero sus noches futuras.
+   ============================================================ */
+async function abrirDarDeBaja(jugador, wrap) {
+  let tieneHistorial = true;
+  try {
+    tieneHistorial = await jugadorTieneHistorial(jugador.id);
+  } catch (err) {
+    toast(humanizeError(err), 'error');
+    return;
+  }
+
+  const nombre = jugador.full_name || 'este registro sin nombre';
+  const content = el('div', {}, [
+    el('div', { class: 'sheet-title' }, tieneHistorial ? '¿Archivar a este jugador?' : '¿Borrar este registro?'),
+    el('p', { class: 'text-tiny mb-3' }, tieneHistorial
+      ? `${nombre} ya tiene historial en el club (partidos, puntos, cashbacks o multas). `
+        + 'Se va a ARCHIVAR: desaparece del ranking, del buscador y de las listas, y no se puede volver a anotar. '
+        + 'Su historial y el de sus rivales se queda intacto — borrarlo de verdad dejaría huecos en noches ya jugadas. '
+        + 'Si tiene lugar en noches que todavía no se juegan, se lo liberamos y entra quien siga en la lista de espera.'
+      : `${nombre} nunca ha jugado ni tiene nada a su nombre, así que se BORRA de verdad: su perfil desaparece del club. `
+        + 'Si algún día vuelve a entrar con el mismo correo, la app lo trata como jugador nuevo y le pide registrarse otra vez.'),
+  ]);
+
+  const btnOk = el('button', { class: 'btn btn-danger mt-2' }, tieneHistorial ? 'Sí, archivarlo' : 'Sí, borrarlo');
+  btnOk.addEventListener('click', async () => {
+    btnOk.disabled = true; btnOk.textContent = 'Procesando…';
+    try {
+      const r = await adminEliminarJugador(jugador.id);
+      handle.close();
+      const liberadas = r && r.noches_liberadas ? ` Se le liberaron ${r.noches_liberadas} noche(s).` : '';
+      toast(r && r.accion === 'borrado'
+        ? `Registro borrado.${liberadas}`
+        : `Jugador archivado.${liberadas}`, 'success', 5000);
+      // Ya no existe (o ya no debe salir) en la ficha: de vuelta a la lista.
+      renderAdminJugadores().then((n) => wrap.replaceWith(n));
+    } catch (err) {
+      toast(humanizeError(err), 'error');
+      btnOk.disabled = false; btnOk.textContent = tieneHistorial ? 'Sí, archivarlo' : 'Sí, borrarlo';
+    }
+  });
+  content.appendChild(btnOk);
+  content.appendChild(el('button', { class: 'btn btn-ghost mt-2', onclick: () => handle.close() }, 'Mejor no'));
+  const handle = openSheet(content);
+}
+
 async function cargarFicha(wrap, jugador) {
   wrap.innerHTML = '';
   wrap.appendChild(el('button', { class: 'btn btn-ghost btn-sm mb-3', style: 'width:auto;padding-left:0;', onclick: () => renderAdminJugadores().then((n) => wrap.replaceWith(n)) }, '← Volver a la búsqueda'));
 
   const refresh = () => pintarFicha(wrap, jugador);
 
+  const faltaPerfil = !((jugador.full_name || '').trim()) || !((jugador.phone || '').trim()) || !jugador.declared_level;
+
   wrap.appendChild(el('div', { class: 'card', style: 'text-align:center;' }, [
     el('div', { class: 'avatar-btn', style: 'width:72px;height:72px;font-size:22px;margin:0 auto 12px;' }, avatarContent(jugador)),
     el('div', { class: 'h2' }, jugador.full_name || 'Sin nombre'),
     el('div', { class: 'text-tiny mt-1' }, jugador.email),
-    jugador.status !== 'active' ? el('span', { class: 'badge badge-warning mt-2' }, jugador.status === 'suspended' ? 'Suspendido' : 'Inactivo') : null,
+    jugador.phone ? el('div', { class: 'text-tiny mt-1' }, `Cel. ${jugador.phone}`) : null,
+    jugador.declared_level ? el('div', { class: 'text-tiny mt-1' }, nombreNivel(jugador.declared_level)) : null,
+    jugador.status !== 'active' ? el('span', { class: 'badge badge-warning mt-2' }, jugador.status === 'suspended' ? 'Suspendido' : 'Archivado') : null,
+    el('div', { class: 'btn-row mt-3' }, [
+      el('button', { class: 'btn btn-secondary btn-sm', onclick: () => abrirEditarJugador(jugador, refresh) }, 'Editar datos'),
+      el('button', { class: 'btn btn-danger btn-sm', onclick: () => abrirDarDeBaja(jugador, wrap) }, 'Dar de baja'),
+    ]),
   ]));
+
+  // Un perfil a medias es casi siempre alguien que entró con su correo y
+  // cerró la app antes de terminar de registrarse. No puede anotarse a
+  // ninguna noche hasta completarlo (la base lo bloquea), así que aquí se
+  // le avisa a recepción para que lo complete a mano o lo borre.
+  if (faltaPerfil) {
+    wrap.appendChild(el('div', { class: 'aviso aviso-warn mt-2' }, [
+      el('strong', {}, 'Le falta terminar su registro. '),
+      'Mientras no tenga nombre, celular y nivel no se puede anotar a ninguna noche. '
+      + 'Complétalo con "Editar datos" si sabes quién es, o dale de baja si fue un registro que quedó a medias.',
+    ]));
+  }
 
   // ---- Registros activos próximos ----
   const registros = await getRegistrosActivosDeJugador(jugador.id);

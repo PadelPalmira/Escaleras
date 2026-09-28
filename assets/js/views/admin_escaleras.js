@@ -688,9 +688,16 @@ function pedirMotivoCancelacion(confirmados, cupo) {
         `Van ${confirmados} de ${cupo}. Al cancelar se libera a todos: nadie recibe penalización ni pierde puntos, y la app les avisa sola. No se puede deshacer.`),
       el('div', { class: 'field' }, [el('label', {}, 'Motivo (lo van a ver los jugadores)'), input]),
     ]);
-    const btnCancelar = el('button', { class: 'btn btn-ghost mt-3', onclick: () => { handle.close(); resolve(null); } }, 'Mejor no');
+    // OJO con el orden: handle.close() dispara el onClose de más abajo, que
+    // resuelve la promesa en null. Si se cierra ANTES de resolver con el
+    // motivo, la promesa ya quedó en null y el resolve siguiente no hace
+    // nada: la cancelación nunca se mandaba y la pantalla se quedaba igual,
+    // sin error ni aviso (bug real, reportado el 28/09/2026). Por eso aquí
+    // siempre se resuelve primero y se cierra después.
+    const btnCancelar = el('button', { class: 'btn btn-ghost mt-3', onclick: () => { resolve(null); handle.close(); } }, 'Mejor no');
     const btnOk = el('button', { class: 'btn btn-danger mt-2', onclick: () => {
-      handle.close(); resolve(input.value.trim() || 'No se completó el cupo');
+      resolve(input.value.trim() || 'No se completó el cupo');
+      handle.close();
     } }, 'Sí, cancelar la noche');
     content.appendChild(btnOk);
     content.appendChild(btnCancelar);

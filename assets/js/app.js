@@ -3,7 +3,7 @@ import { el, qs } from './utils.js';
 import { icon } from './icons.js';
 import { whatsappHelpUrl } from './config.js';
 import { registerRoute, initRouter, navigate, currentRoute } from './router.js';
-import { getMyProfile, esAdminOMaestro, contarNotificacionesSinLeer } from './api.js';
+import { getMyProfile, esAdminOMaestro, contarNotificacionesSinLeer, voyCalificadoLiguilla } from './api.js';
 import { renderLoginScreen } from './views/login.js';
 import { renderCompletarPerfil } from './views/completar_perfil.js';
 import { renderGuiaApp } from './views/guia_app.js';
@@ -104,6 +104,28 @@ export async function refrescarAvisos(profile) {
   }
 }
 
+/* Brillo dorado en la pestaña Liguilla.
+   Si vas dentro del top 12 de tu categoría (o ya saliste en la lista
+   oficial del mes), el trofeo de abajo se pone dorado: es un recordatorio
+   permanente de que tienes algo en juego. En cuanto sales del corte
+   vuelve solo a su color normal. Se revisa al abrir la app y, como el
+   lugar solo se mueve cuando se cierra una noche, como mucho una vez por
+   minuto al navegar — no en cada toque. */
+let ultimoChequeoCalificado = 0;
+
+export async function refrescarBrilloLiguilla({ forzar = false } = {}) {
+  if (!navEl) return;
+  const ahoraMs = Date.now();
+  if (!forzar && ahoraMs - ultimoChequeoCalificado < 60000) return;
+  ultimoChequeoCalificado = ahoraMs;
+  const btn = Array.from(navEl.children).find((b) => b.dataset.path === '/liguilla');
+  if (!btn) return;
+  let calificado = false;
+  try { calificado = await voyCalificadoLiguilla(); } catch { return; }
+  btn.classList.toggle('calificado', calificado);
+  btn.title = calificado ? 'Vas calificado a la Liguilla de este mes' : '';
+}
+
 function updateActiveNav(path) {
   Array.from(navEl.children).forEach((btn) => {
     // /admin/* y /maestro también resaltan el tab "Admin".
@@ -129,12 +151,23 @@ async function showApp() {
   // completarlos (y de paso, dentro de esa misma pantalla, también se pide
   // el nivel de juego — ver completar_perfil.js). Cubre tanto cuentas
   // nuevas como perfiles viejos que se crearon antes de que estos campos
-  // fueran requeridos. A propósito NO se revalida `declared_level` aquí
-  // para cuentas que ya tenían el perfil completo antes de que existiera
-  // este campo (p.ej. el Maestro) — obligarlas a declarar un nivel
-  // retroactivamente repetiría el mismo bug de "pedir datos de nuevo a
-  // cuentas viejas" que ya se corrigió una vez.
-  if (profile && (!profile.full_name?.trim() || !profile.phone?.trim())) {
+  // fueran requeridos.
+  //
+  // 2.0: el nivel también es obligatorio, pero SOLO para jugadores. Antes
+  // no se revalidaba para nadie, y así se acumularon cuentas a medias: gente
+  // que entró con su correo, cerró la pantalla y quedó como registro sin
+  // nombre. El staff (maestro/admin) queda fuera a propósito: no juega
+  // escaleras, así que pedirle un nivel sería repetir el viejo bug de
+  // "pedirle datos de nuevo a cuentas que ya estaban completas".
+  // La base también lo exige ahora (trg_guard_perfil_completo): con el
+  // perfil a medias no se puede anotar a una noche ni aunque se salte esta
+  // pantalla desde otro lado.
+  const perfilAMedias = profile && (
+    !profile.full_name?.trim()
+    || !profile.phone?.trim()
+    || (profile.role === 'jugador' && !profile.declared_level)
+  );
+  if (perfilAMedias) {
     appEl.innerHTML = '';
     appEl.appendChild(renderCompletarPerfil(profile, (updatedProfile, recomendacion) => {
       // Justo después de completar el perfil, un jugador nuevo ve la guía
@@ -173,9 +206,10 @@ async function showApp() {
   registerRoute('/admin/escanear-cashback', renderAdminEscanearCashback);
   registerRoute('/maestro', renderMaestro);
   initRouter(viewEl, {
-    onNavigateCb: (path) => { updateActiveNav(path); refrescarAvisos(profile); },
+    onNavigateCb: (path) => { updateActiveNav(path); refrescarAvisos(profile); refrescarBrilloLiguilla(); },
   });
   refrescarAvisos(profile);
+  refrescarBrilloLiguilla({ forzar: true });
 }
 
 async function boot() {
