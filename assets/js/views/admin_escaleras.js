@@ -6,7 +6,7 @@ import {
   generarSiguienteRonda, registrarResultadoPartido, corregirResultadoPartido, cerrarEscalera,
   marcarNoShow, cancelarRegistro, asignarSustituto, asignarSustitutoAdmin, deshacerSustituto, buscarJugadores,
   cancelarEscaleraAdmin,
-  comenzarEscalera, adminAgregarJugador, getAjusteNum,
+  comenzarEscalera, adminAgregarJugador, getAjusteNum, getTablaNoche, cambiarFormatoNoche,
   iniciarCronometroRonda, horaServidor,
   responderInvitacionPareja, reemplazarJugadorEnCancha,
   podioDeNoche,
@@ -276,6 +276,7 @@ async function pintarDetalle(wrap, escaleraId) {
     wrap.appendChild(renderSinConfirmar(esc, ws, confirmados, refresh));
     wrap.appendChild(renderComenzar(esc, confirmados.length, cupo, faltan, completo, refresh));
     wrap.appendChild(renderRoster(esc, ws, registros, confirmados, enEspera, cupo, refresh));
+    wrap.appendChild(renderCambiarFormatoNoche(esc, confirmados.length + enEspera.length, refresh));
   } else if (esc.status !== 'cancelled') {
     wrap.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' },
       `${confirmados.length} jugadores en cancha`));
@@ -351,7 +352,11 @@ async function pintarDetalle(wrap, escaleraId) {
     ]));
   } else {
     if (ultimaRonda.round_number < tope) {
-      accionesFinales.appendChild(el('button', { class: 'btn btn-secondary', onclick: async (e) => {
+      // Este es EL botón de la noche: el que se aprieta 6 veces seguidas.
+      // Antes era el gris y "Cerrar la noche" era el de color, así que a
+      // media noche el botón que saltaba a la vista era justo el que no hay
+      // que apretar (reportado en la primera noche real, 29/09).
+      accionesFinales.appendChild(el('button', { class: 'btn btn-primary', onclick: async (e) => {
         e.target.disabled = true; e.target.textContent = 'Armando la siguiente…';
         // Al terminar la ronda se abre sola la hoja con el acomodo nuevo: es
         // el momento en que recepcion tiene que decirle a 12 personas a que
@@ -373,19 +378,39 @@ async function pintarDetalle(wrap, escaleraId) {
       accionesFinales.appendChild(el('div', { class: 'aviso aviso-neutral' },
         `Ya se jugaron las ${tope} rondas de la noche. Cierra la escalera para repartir los bonos.`));
     }
-    accionesFinales.appendChild(el('button', { class: 'btn btn-primary', onclick: async (e) => {
+    const quedanRondas = ultimaRonda.round_number < tope;
+    accionesFinales.appendChild(el('button', {
+      class: quedanRondas ? 'btn btn-ghost btn-sm' : 'btn btn-primary',
+      style: quedanRondas ? 'margin-top:14px;color:var(--text-tertiary);font-size:13px;' : '',
+      onclick: async (e) => {
       const ok = await confirmSheet({
         title: '¿Cerrar la noche?',
-        body: `Se reparten los bonos de posición final según la cancha donde terminó cada quien, y la noche entra al ranking. Se cierra con las ${ultimaRonda.round_number} ronda(s) jugadas. No se puede deshacer desde aquí.`,
+        body: quedanRondas
+          ? `OJO: todavía se pueden jugar hasta ${tope} rondas y solo van ${ultimaRonda.round_number}. Si cierras ahora, la noche termina aquí para todos: se reparten los bonos según la cancha donde quedó cada quien y entra al ranking así. No se puede deshacer.`
+          : `Se reparten los bonos de posición final según la cancha donde terminó cada quien, y la noche entra al ranking. Se cierra con las ${ultimaRonda.round_number} ronda(s) jugadas. No se puede deshacer desde aquí.`,
         confirmLabel: 'Sí, cerrar',
       });
       if (!ok) return;
       e.target.disabled = true; e.target.textContent = 'Cerrando…';
       try { await cerrarEscalera(escaleraId); toast('Noche cerrada — bonos repartidos.', 'success'); refresh(); }
       catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; e.target.textContent = 'Cerrar la noche'; }
-    } }, 'Cerrar la noche'));
+    } }, quedanRondas ? `Cerrar la noche aquí (solo ${ultimaRonda.round_number} ronda(s))` : 'Cerrar la noche'));
   }
   wrap.appendChild(accionesFinales);
+
+  // Cómo van (o cómo quedaron). En vivo es lo que recepción canta en voz
+  // alta entre rondas, y al cerrar es el resumen que antes no existía por
+  // ningún lado: quién ganó la noche, con cuántos puntos y quién se llevó
+  // cashback.
+  const tablaBox = el('div', { class: 'card mt-2' });
+  tablaBox.appendChild(el('p', { class: 'text-tiny' }, 'Cargando la tabla…'));
+  wrap.appendChild(el('div', { class: 'section-title' },
+    esc.status === 'completed' ? 'Cómo quedaron' : 'Cómo van'));
+  wrap.appendChild(tablaBox);
+  pintarTablaNocheAdmin(tablaBox, esc).catch(() => {
+    tablaBox.innerHTML = '';
+    tablaBox.appendChild(el('p', { class: 'text-muted' }, 'No se pudo cargar la tabla de la noche.'));
+  });
 
   /* Las rondas ya jugadas quedan guardadas pero fuera del camino. */
   if (anteriores.length) {
@@ -1048,23 +1073,19 @@ async function compartirResultadosNoche(esc, btn) {
   btn.innerHTML = '';
   btn.appendChild(el('span', {}, 'Generando imagen…'));
   try {
-    const filas = await podioDeNoche(esc.id);
+    // 2.1: la tarjeta trae la noche COMPLETA. Antes solo salía el podio de
+    // cashbacks (3 nombres, sin puntos) y el resto de los jugadores no
+    // aparecía por ningún lado.
+    const filas = await getTablaNoche(esc.id);
     if (!filas.length) {
-      toast('Esta noche no tiene podio de cashbacks que compartir (Retas Abiertas no reparte).', 'info', 5000);
+      toast('Esta noche no tiene resultados que compartir todavía.', 'info', 5000);
       return;
     }
-    const porLugar = new Map();
-    filas.forEach((f) => {
-      if (!porLugar.has(f.place)) porLugar.set(f.place, { place: f.place, nombres: [], amount_mxn: f.amount_mxn });
-      porLugar.get(f.place).nombres.push(f.full_name || '(sin nombre)');
-    });
-    const grupos = Array.from(porLugar.values()).sort((a, b) => a.place - b.place);
-
     const canvas = await generarTarjetaNoche({
       sessionDateLabel: formatFecha(esc.session_date),
       formatoLabel: FORMAT_LABEL[esc.format] || esc.format,
       categoryLabel: esc.category ? `Categoría ${esc.category}` : '',
-      grupos,
+      filas,
     });
     await compartirTarjeta(canvas, {
       archivo: `resultados-${esc.session_date}.png`,
@@ -1079,6 +1100,7 @@ async function compartirResultadosNoche(esc, btn) {
     btn.append(el('span', { html: icon.share, style: 'width:18px;height:18px;' }), textoOriginal);
   }
 }
+
 
 function nombreEquipo(m, prefix) {
   const p1 = m[`${prefix}_player1_nombre`];
@@ -1353,4 +1375,101 @@ function abrirSustituto(registro, onChange, formato) {
   content.appendChild(search);
   content.appendChild(list);
   const handle = openSheet(content);
+}
+
+/* ============================================================
+   La tabla de la noche para recepción (deployment 2.1).
+   ------------------------------------------------------------
+   Sirve para las dos cosas: cantar cómo van entre ronda y ronda,
+   y ver el resumen completo al cerrar — con los puntos de cada
+   quien y quién se llevó cashback. Antes, al cerrar la noche no
+   se veía nada de esto en ningún lado.
+   ============================================================ */
+async function pintarTablaNocheAdmin(box, esc) {
+  const filas = await getTablaNoche(esc.id);
+  box.innerHTML = '';
+  if (!filas.length) {
+    box.appendChild(el('p', { class: 'text-muted' }, 'Todavía no hay marcadores capturados.'));
+    return;
+  }
+  filas.sort((a, b) => a.lugar - b.lugar);
+
+  if (esc.status !== 'completed') {
+    box.appendChild(el('p', { class: 'text-tiny mb-2', style: 'color:var(--text-tertiary);' },
+      'Se actualiza con cada marcador que capturas. El bono por la cancha final se suma hasta cerrar la noche.'));
+  }
+
+  filas.forEach((r) => {
+    const medalla = r.lugar === 1 ? '🥇' : r.lugar === 2 ? '🥈' : r.lugar === 3 ? '🥉' : null;
+    box.appendChild(el('div', { class: 'list-row' }, [
+      el('span', { class: 'rank' }, medalla || String(r.lugar)),
+      el('span', { class: 'avatar' }, avatarContent(r)),
+      el('div', { style: 'min-width:0;' }, [
+        el('div', { class: 'name' }, r.full_name),
+        el('div', { class: 'meta' },
+          `${r.partidos_ganados}/${r.partidos_jugados} partidos · games ${r.games_favor}-${r.games_contra}`
+          + (r.cancha_actual ? ` · cancha ${r.cancha_actual}` : '')
+          + (r.es_sustituto ? ' · sustituto' : '')),
+        r.cashback_mxn
+          ? el('div', { class: 'meta', style: 'color:var(--success);font-weight:700;' },
+              `Cashback $${Number(r.cashback_mxn)} MXN`)
+          : null,
+      ]),
+      el('span', { class: 'value' }, [
+        el('div', {}, String(r.puntos)),
+        el('div', { class: 'text-tiny', style: 'font-weight:600;color:var(--text-tertiary);' }, 'pts'),
+      ]),
+    ]));
+  });
+
+  const conCashback = filas.filter((r) => r.cashback_mxn);
+  if (esc.status === 'completed' && conCashback.length) {
+    const total = conCashback.reduce((a, r) => a + Number(r.cashback_mxn), 0);
+    box.appendChild(el('div', { class: 'aviso aviso-ok mt-3' }, [
+      el('strong', {}, `Cashbacks de la noche: $${total} MXN. `),
+      conCashback.map((r) => `${r.full_name} $${Number(r.cashback_mxn)}`).join(' · ')
+      + '. Cada uno lo ve en su Perfil con su código QR, a partir de su próxima visita.',
+    ]));
+  }
+}
+
+/* ============================================================
+   Cambiar el formato de una noche suelta.
+   ------------------------------------------------------------
+   De Parejas a Individual nadie pierde su lugar (solo se
+   deshacen las parejas). Al revés sí hay que liberar a todos,
+   porque nadie tiene con quién jugar — por eso se avisa antes
+   cuántos van a quedar libres.
+   ============================================================ */
+function renderCambiarFormatoNoche(esc, anotados, refresh) {
+  const box = el('div', { class: 'mt-4' });
+  if (esc.format === 'retas_abiertas' || esc.is_liguilla) return box;
+  const destino = esc.format === 'individual' ? 'parejas' : 'individual';
+  const destinoLbl = destino === 'individual' ? 'Individual' : 'Parejas Fijas';
+
+  box.appendChild(el('button', {
+    class: 'btn btn-ghost btn-sm', style: 'width:auto;padding-left:0;color:var(--text-tertiary);font-size:13px;',
+    onclick: async () => {
+      const aviso = destino === 'parejas'
+        ? (anotados > 0
+            ? `Esta noche pasa a ${destinoLbl}. Como nadie tiene con quién jugar, se libera a los ${anotados} anotados sin penalización y se les avisa para que se vuelvan a anotar con su pareja.`
+            : `Esta noche pasa a ${destinoLbl}. No hay nadie anotado todavía, así que no afecta a nadie.`)
+        : (anotados > 0
+            ? `Esta noche pasa a ${destinoLbl}. Los ${anotados} anotados conservan su lugar, pero ya no juegan fijo con su pareja: la app les asigna compañero distinto en cada ronda. Se les avisa.`
+            : `Esta noche pasa a ${destinoLbl}. No hay nadie anotado todavía.`);
+      const ok = await confirmSheet({
+        title: `¿Cambiar esta noche a ${destinoLbl}?`,
+        body: aviso + ' Solo cambia ESTA noche; el horario de la semana no se toca.',
+        confirmLabel: `Sí, cambiar a ${destinoLbl}`,
+        danger: destino === 'parejas' && anotados > 0,
+      });
+      if (!ok) return;
+      try {
+        const r = await cambiarFormatoNoche(esc.id, destino);
+        toast(`Noche cambiada a ${destinoLbl}.` + (r && r.liberados ? ` Se liberó a ${r.liberados} jugador(es).` : ''), 'success', 6000);
+        refresh();
+      } catch (err) { toast(humanizeError(err), 'error', 6000); }
+    },
+  }, `Cambiar esta noche a ${destinoLbl}`));
+  return box;
 }

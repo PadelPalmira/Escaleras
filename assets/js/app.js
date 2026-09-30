@@ -4,12 +4,12 @@ import { icon } from './icons.js';
 import { whatsappHelpUrl } from './config.js';
 import { registerRoute, initRouter, navigate, currentRoute } from './router.js';
 import { getMyProfile, esAdminOMaestro, contarNotificacionesSinLeer, voyCalificadoLiguilla } from './api.js';
-import { renderLoginScreen } from './views/login.js';
+import { renderLoginScreen, renderNuevaPassword } from './views/login.js';
 import { renderCompletarPerfil } from './views/completar_perfil.js';
 import { renderGuiaApp } from './views/guia_app.js';
 import { renderHome } from './views/home.js';
 import { renderRanking } from './views/ranking.js';
-import { renderConvocatorias } from './views/convocatorias.js';
+import { renderConvocatorias, renderConvocatoriaDetalle } from './views/convocatorias.js';
 import { renderReglas } from './views/reglas.js';
 import { renderPerfil } from './views/perfil.js';
 import { renderLiguilla } from './views/liguilla.js';
@@ -196,6 +196,7 @@ async function showApp() {
   registerRoute('/inicio', renderHome);
   registerRoute('/ranking', renderRanking);
   registerRoute('/convocatorias', renderConvocatorias);
+  registerRoute('/convocatoria', renderConvocatoriaDetalle);
   registerRoute('/reglas', renderReglas);
   registerRoute('/perfil', renderPerfil);
   registerRoute('/liguilla', renderLiguilla);
@@ -212,9 +213,37 @@ async function showApp() {
   refrescarBrilloLiguilla({ forzar: true });
 }
 
+/* El enlace de "olvide mi contrasena" abre la app con la sesion en modo
+   recuperacion: lo unico que falta es que escriba la contrasena nueva. Se
+   revisa de dos formas porque el SDK procesa el hash al crearse el cliente
+   (a veces antes de que alcancemos a escuchar el evento) y ahi el hash ya
+   no esta. */
+let enRecuperacion = false;
+function esEnlaceDeRecuperacion() {
+  const h = String(window.location.hash || '');
+  return h.includes('type=recovery');
+}
+function mostrarNuevaPassword() {
+  if (enRecuperacion) return;
+  enRecuperacion = true;
+  appEl = appEl || document.getElementById('app');
+  appEl.innerHTML = '';
+  appEl.appendChild(renderNuevaPassword(() => {
+    enRecuperacion = false;
+    // Limpia el #access_token=... de la barra de direcciones antes de entrar.
+    history.replaceState(null, '', window.location.pathname + '#/inicio');
+    showApp();
+  }));
+}
+
 async function boot() {
   appEl = document.getElementById('app');
+  const recuperando = esEnlaceDeRecuperacion();
   const { data } = await supabase.auth.getSession();
+  if (recuperando && data.session) {
+    mostrarNuevaPassword();
+    return;
+  }
   if (data.session) {
     await showApp();
   } else {
@@ -226,9 +255,12 @@ async function boot() {
   window.addEventListener('avisos-cambiaron', () => { refrescarAvisos(); });
 
   supabase.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_IN' && !appEl.querySelector('.bottom-nav')) {
+    if (event === 'PASSWORD_RECOVERY') {
+      mostrarNuevaPassword();
+    } else if (event === 'SIGNED_IN' && !enRecuperacion && !appEl.querySelector('.bottom-nav')) {
       showApp();
     } else if (event === 'SIGNED_OUT') {
+      enRecuperacion = false;
       showLoginScreen();
     }
   });

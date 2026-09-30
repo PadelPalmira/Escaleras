@@ -348,6 +348,20 @@ textarea.input{ height: auto; padding: var(--sp-3) var(--sp-4); resize: vertical
 .list-row .meta{ font-size: 12.5px; color: var(--text-tertiary); }
 .list-row .value{ margin-left: auto; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 
+/* Lista de reglas del formato dentro de la página de una noche */
+/* El reset de arriba quita los bullets de todos los <ul>; aquí se reponen,
+   porque son reglas sueltas y sin viñeta se leen como un párrafo partido. */
+.lista-reglas{ margin: 0; padding-left: 4px; list-style: none; }
+.lista-reglas li{
+  font-size: 13.2px; color: var(--text-secondary); line-height: 1.45; margin-bottom: 5px;
+  padding-left: 14px; position: relative;
+}
+.lista-reglas li::before{
+  content: ''; position: absolute; left: 0; top: 8px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--text-tertiary);
+}
+.lista-reglas li:last-child{ margin-bottom: 0; }
+
 /* Noche cancelada: la tarjeta se queda a la vista pero apagada, para que se
    entienda de un vistazo que ya no va — antes simplemente desaparecía. */
 .card-cancelada{ opacity: 0.72; }

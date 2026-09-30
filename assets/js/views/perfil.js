@@ -1,6 +1,7 @@
 import { el, avatarContent, formatFecha, formatFechaHora, formatFechaDeTimestamp, formatPuntos, toast, humanizeError, ahora, todayISO } from '../utils.js';
 import { icon } from '../icons.js';
 import { navigate } from '../router.js';
+import { APP_URL } from '../config.js';
 import { comprimirFotoPerfil } from '../avatar.js';
 import { generarQR } from '../vendor/qrencode.js';
 import { generarTarjetaRanking, generarTarjetaLiguilla, compartirTarjeta } from '../vendor/sharecard.js';
@@ -10,6 +11,7 @@ import {
   getMiSituacionCategorias, getMiInteresFemenil, alternarInteresFemenil, getAjusteNum,
   subirFotoPerfil, borrarFotoPerfil, getWeekdayScheduleAll, getMisCashbacks,
   getRankingCompleto, getEventoLiguillaActivo, getParejasLiguilla,
+  ponerPassword,
 } from '../api.js';
 import { NIVELES, esFemenil, recomendacionPorNivel, textoDia } from '../niveles.js';
 
@@ -146,6 +148,21 @@ async function renderTarjetaFemenil(profile) {
 /* Dibuja un QR (ver assets/js/vendor/qrencode.js, generador propio sin
    dependencias) dentro de un <canvas>, con su zona de silencio blanca
    alrededor — sin eso una cámara de celular no lo detecta bien de cerca. */
+/* El QR del cashback es una LIGA, no un código suelto.
+   ------------------------------------------------------------
+   Safari en iPhone no trae el lector de códigos que usan Chrome y
+   Android, así que el escáner de la app nunca podía abrir la cámara
+   en un iPhone. Pero la cámara NATIVA de cualquier celular sí lee
+   QRs, y si el QR es una liga te ofrece abrirla de un toque. Así
+   recepción apunta con su cámara normal, se abre la app y el
+   cashback se redime solo.
+   El escáner de dentro de la app y el código escrito a mano siguen
+   funcionando igual, y los QR viejos (que traían el código pelón)
+   también — el lector acepta las dos formas. */
+function ligaCashback(codigo) {
+  return `${APP_URL}#/admin/escanear-cashback?c=${encodeURIComponent(codigo)}`;
+}
+
 function dibujarQR(texto, tamanoPx = 176) {
   const { size, matrix } = generarQR(texto);
   const canvas = el('canvas', { width: tamanoPx, height: tamanoPx, style: `width:${tamanoPx}px;height:${tamanoPx}px;` });
@@ -190,7 +207,7 @@ function renderTarjetaCashback(c) {
     c.status === 'usado' ? el('p', { class: 'text-tiny mt-2' }, `Usado el ${formatFechaHora(c.used_at)}`) : null,
     c.status === 'vencido' ? el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' }, `Venció el ${formatFechaDeTimestamp(c.expires_at)} sin usarse.`) : null,
     puedeMostrarQR ? el('div', { class: 'mt-3', style: 'text-align:center;' }, [
-      dibujarQR(`CB1:${c.redeem_token}`, 160),
+      dibujarQR(ligaCashback(`CB1:${c.redeem_token}`), 160),
       el('p', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' }, 'Enséñale este código a recepción para usarlo.'),
     ]) : null,
   ]);
@@ -307,7 +324,7 @@ async function renderSeccionCashbacks(profile) {
     wrap.appendChild(el('div', { class: 'card mt-3', style: 'text-align:center;border:1.5px dashed var(--cyan);' }, [
       el('div', { style: 'font-weight:700;' }, 'Redimirlos todos de un solo escaneo'),
       el('p', { class: 'text-tiny mt-1' }, 'Enséñale este código a recepción para usar de un jalón todos tus cashbacks vigentes esa noche.'),
-      el('div', { class: 'mt-2' }, dibujarQR(`CBALL:${profile.id}`, 160)),
+      el('div', { class: 'mt-2' }, dibujarQR(ligaCashback(`CBALL:${profile.id}`), 160)),
     ]));
   }
 
@@ -392,6 +409,51 @@ export async function renderPerfil() {
     });
     wrap.appendChild(list);
   }
+
+  // ---- Contraseña ----
+  // Las cuentas viejas nacieron con enlace mágico y no tienen contraseña.
+  // Ponerle una es lo que arregla el problema del icono en iPhone: el enlace
+  // del correo siempre abre Safari, pero la contraseña se escribe dentro de
+  // la app.
+  wrap.appendChild(el('div', { class: 'section-title' }, 'Contraseña'));
+  const tienePass = !!profile.password_set_at;
+  const passCard = el('div', { class: 'card' });
+  passCard.appendChild(el('p', { class: 'text-tiny' }, tienePass
+    ? 'Ya tienes contraseña: entras directo con tu correo y tu contraseña, sin pasar por el correo.'
+    : 'Todavía entras con el enlace que te llega al correo. Si le pones una contraseña, puedes entrar directo desde el icono de la app en tu celular — sobre todo en iPhone, donde el enlace del correo siempre abre Safari.'));
+  const pass1 = el('input', { class: 'input mt-2', type: 'password', placeholder: 'Mínimo 8 caracteres', autocomplete: 'new-password' });
+  const pass2 = el('input', { class: 'input mt-2', type: 'password', placeholder: 'Escríbela otra vez', autocomplete: 'new-password' });
+  const passMsg = el('p', { class: 'text-tiny mt-2' });
+  const passBtn = el('button', { class: 'btn btn-secondary mt-2' }, tienePass ? 'Cambiar mi contraseña' : 'Ponerle contraseña a mi cuenta');
+  passBtn.addEventListener('click', async () => {
+    if ((pass1.value || '').length < 8) {
+      passMsg.textContent = 'La contraseña necesita al menos 8 caracteres.';
+      passMsg.style.color = 'var(--danger)';
+      return;
+    }
+    if (pass1.value !== pass2.value) {
+      passMsg.textContent = 'Las dos contraseñas no son iguales.';
+      passMsg.style.color = 'var(--danger)';
+      return;
+    }
+    passBtn.disabled = true; passBtn.textContent = 'Guardando…';
+    try {
+      await ponerPassword(pass1.value);
+      pass1.value = ''; pass2.value = '';
+      passMsg.textContent = 'Listo. La próxima vez entra con tu correo y esta contraseña.';
+      passMsg.style.color = 'var(--success)';
+      toast('Contraseña guardada.', 'success');
+      profile.password_set_at = ahora().toISOString();
+    } catch (err) {
+      passMsg.textContent = humanizeError(err);
+      passMsg.style.color = 'var(--danger)';
+    } finally {
+      passBtn.disabled = false;
+      passBtn.textContent = 'Cambiar mi contraseña';
+    }
+  });
+  passCard.append(pass1, pass2, passBtn, passMsg);
+  wrap.appendChild(passCard);
 
   // Edición rápida de datos
   wrap.appendChild(el('div', { class: 'section-title' }, 'Tus datos'));

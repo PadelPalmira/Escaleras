@@ -148,54 +148,70 @@ function dibujarPie(ctx) {
 /* ============================================================
    1) Resultados de la noche — podio compartido (no personalizado).
    ============================================================ */
-export async function generarTarjetaNoche({ sessionDateLabel, formatoLabel, categoryLabel, grupos }) {
+export async function generarTarjetaNoche({ sessionDateLabel, formatoLabel, categoryLabel, filas }) {
   const { canvas, ctx } = crearLienzo();
   await fondoYEncabezado(ctx, {
     titulo: 'Resultados de la noche',
     subtitulo: [sessionDateLabel, formatoLabel, categoryLabel].filter(Boolean).join(' · '),
   });
 
-  // "grupos" ya viene agrupado por lugar: [{ place, nombres: ['Fulano'] o
-  // ['Fulano','Zutano'] si es Parejas, amount_mxn }]
-  let y = 610;
+  // 2.1: antes esta tarjeta solo traía el podio de cashbacks (3 nombres) y
+  // ni un punto. Ahora sale la noche completa — todos los que jugaron, con
+  // sus puntos — y los que se llevaron cashback quedan marcados.
+  const lista = (filas || []).slice().sort((a, b) => a.lugar - b.lugar);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = COLOR.textTertiary;
+  ctx.font = '500 28px ' + FUENTE;
+  ctx.fillText('Puntos de la noche · ' + lista.length + ' jugadores', ANCHO / 2, 585);
+
+  let y = 630;
   const cardX = 80;
   const cardW = ANCHO - 160;
+  const espacio = (ALTO - 150) - y;
+  const alturaFila = Math.max(64, Math.min(140, Math.floor(espacio / Math.max(lista.length, 1)) - 14));
 
-  grupos.forEach((g) => {
-    const nombresTxt = g.nombres.join(' / ');
-    const alturaCard = g.nombres.length > 1 ? 230 : 190;
+  lista.forEach((f) => {
+    const gano = !!f.cashback_mxn;
 
     ctx.save();
-    redondeado(ctx, cardX, y, cardW, alturaCard, 28);
-    ctx.fillStyle = COLOR.surface;
+    redondeado(ctx, cardX, y, cardW, alturaFila, 22);
+    ctx.fillStyle = gano ? COLOR.surface2 : COLOR.surface;
     ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = COLOR.border;
+    ctx.lineWidth = gano ? 3 : 2;
+    ctx.strokeStyle = gano ? COLOR.cyan : COLOR.border;
     ctx.stroke();
     ctx.restore();
 
-    dibujarCirculoIniciales(ctx, cardX + 100, y + alturaCard / 2, 68, `${g.place}º`, 42);
+    const cy = y + alturaFila / 2;
+    const radio = Math.min(46, alturaFila / 2 - 8);
+    dibujarCirculoIniciales(ctx, cardX + 72, cy, radio, String(f.lugar), Math.round(radio * 0.62));
 
     ctx.textAlign = 'left';
     ctx.fillStyle = COLOR.textPrimary;
-    ctx.font = '800 42px ' + FUENTE;
-    const maxNombreW = cardW - 420;
-    if (g.nombres.length > 1) {
-      ctx.fillText(acortar(ctx, g.nombres[0], maxNombreW), cardX + 210, y + alturaCard / 2 - 30);
-      ctx.fillText(acortar(ctx, g.nombres[1], maxNombreW), cardX + 210, y + alturaCard / 2 + 30);
-    } else {
-      ctx.fillText(acortar(ctx, nombresTxt, maxNombreW), cardX + 210, y + alturaCard / 2 + 14);
+    ctx.font = '800 ' + Math.round(Math.min(38, alturaFila * 0.42)) + 'px ' + FUENTE;
+    const anchoNombre = cardW - (gano ? 520 : 330);
+    ctx.fillText(acortar(ctx, f.full_name, anchoNombre), cardX + 140, cy + (alturaFila > 90 ? 0 : 12));
+
+    if (alturaFila > 90) {
+      ctx.fillStyle = COLOR.textTertiary;
+      ctx.font = '500 26px ' + FUENTE;
+      ctx.fillText(f.partidos_ganados + '/' + f.partidos_jugados + ' partidos', cardX + 140, cy + 36);
     }
 
-    if (g.amount_mxn) {
+    if (gano) {
       ctx.textAlign = 'right';
       ctx.fillStyle = COLOR.cyan;
-      ctx.font = '800 40px ' + FUENTE;
-      const etiquetaMonto = g.nombres.length > 1 ? `$${Number(g.amount_mxn)} c/u` : `$${Number(g.amount_mxn)}`;
-      ctx.fillText(etiquetaMonto, cardX + cardW - 40, y + alturaCard / 2 + 14);
+      ctx.font = '800 ' + Math.round(Math.min(32, alturaFila * 0.34)) + 'px ' + FUENTE;
+      ctx.fillText('$' + Number(f.cashback_mxn), cardX + cardW - 190, cy + 12);
     }
 
-    y += alturaCard + 32;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = gano ? COLOR.textPrimary : COLOR.textSecondary;
+    ctx.font = '800 ' + Math.round(Math.min(44, alturaFila * 0.46)) + 'px ' + FUENTE;
+    ctx.fillText(Number(f.puntos).toFixed(0), cardX + cardW - 40, cy + 14);
+
+    y += alturaFila + 14;
   });
 
   dibujarPie(ctx);

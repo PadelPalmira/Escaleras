@@ -1203,3 +1203,102 @@ export async function adminEliminarJugador(playerId) {
   if (error) throw error;
   return data || {};
 }
+
+/* =====================================================================
+   Deployment 2.1
+   ===================================================================== */
+
+/* ---------- Entrar con contraseña ----------
+   El enlace mágico sigue ahí, pero en iPhone SIEMPRE abre Safari: si el
+   jugador guardó la app en su pantalla de inicio, la sesión se queda en
+   Safari y el icono sigue pidiendo entrar. Con contraseña nunca sale de
+   la app. */
+export async function registrarseConPassword(email, password, { full_name, phone } = {}) {
+  const { data, error } = await supabase.auth.signUp({
+    email: (email || '').trim(),
+    password,
+    options: {
+      emailRedirectTo: window.location.origin + window.location.pathname,
+      data: { full_name, phone },
+    },
+  });
+  if (error) throw error;
+  // Si el proyecto pide confirmar el correo, Supabase NO regresa sesión:
+  // hay que avisarle al jugador que revise su correo antes de entrar.
+  return { sesion: data.session || null, usuario: data.user || null };
+}
+
+export async function entrarConPassword(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: (email || '').trim(),
+    password,
+  });
+  if (error) throw error;
+  return data.session;
+}
+
+export async function mandarResetPassword(email) {
+  const { error } = await supabase.auth.resetPasswordForEmail((email || '').trim(), {
+    redirectTo: window.location.origin + window.location.pathname,
+  });
+  if (error) throw error;
+}
+
+/* Sirve para las dos cosas: ponerle contraseña por primera vez a una cuenta
+   que nació con enlace mágico, y cambiarla después. */
+export async function ponerPassword(password) {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw error;
+  try {
+    const { data } = await supabase.auth.getUser();
+    if (data && data.user) {
+      await supabase.from('profiles').update({ password_set_at: ahora().toISOString() }).eq('id', data.user.id);
+    }
+  } catch { /* el aviso de "ponle contraseña" es cosmético: si falla, ni modo */ }
+}
+
+/* ---------- La noche en vivo y al cerrar ---------- */
+
+/* Tabla de la noche: posiciones, puntos, partidos y cashbacks. Funciona
+   mientras se juega (en vivo, ronda a ronda) y cuando ya cerró. */
+export async function getTablaNoche(escaleraId) {
+  const { data, error } = await supabase.rpc('tabla_noche', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return data || [];
+}
+
+/* ---------- Cambiar el formato de juego ---------- */
+
+export async function cambiarFormatoNoche(escaleraId, formato) {
+  const { data, error } = await supabase.rpc('cambiar_formato_noche', {
+    p_escalera_id: escaleraId, p_format: formato,
+  });
+  if (error) throw error;
+  return data || {};
+}
+
+export async function cambiarFormatoWeekday(weekdayScheduleId, formato, aplicarFuturas = true) {
+  const { data, error } = await supabase.rpc('cambiar_formato_weekday', {
+    p_weekday_schedule_id: weekdayScheduleId, p_format: formato, p_aplicar_futuras: aplicarFuturas,
+  });
+  if (error) throw error;
+  return data || {};
+}
+
+/* ---------- Alta de un jugador desde Admin ----------
+   Crear la cuenta de alguien más necesita la llave de servicio, que nunca
+   puede vivir en el navegador: por eso esto pasa por una función servidor
+   (Edge Function) que vuelve a checar que quien llama sea Admin o Maestro. */
+export async function crearJugadorAdmin({ email, fullName, phone, declaredLevel = null }) {
+  const { data, error } = await supabase.functions.invoke('crear-jugador', {
+    body: { email, full_name: fullName, phone, declared_level: declaredLevel },
+  });
+  if (error) {
+    // El cuerpo del error trae el motivo en español; el error de red, no.
+    let detalle = '';
+    try { detalle = (await error.context.json()).error; } catch { /* sin cuerpo */ }
+    throw new Error(detalle || error.message || 'No se pudo dar de alta al jugador.');
+  }
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}

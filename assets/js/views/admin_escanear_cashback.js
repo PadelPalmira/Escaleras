@@ -70,8 +70,37 @@ export async function renderAdminEscanearCashback() {
   }
   pintarManual('¿No tienes forma de escanear ahora, o la cámara no lo lee? Escribe el código aquí:');
 
+  // Si llegamos aquí desde el QR (la cámara del celular abrió la liga), el
+  // código viene en la dirección: se redime solo, sin que recepción teclee
+  // nada. Es justo lo que arregla el escaneo en iPhone.
+  const codigoEnLaLiga = (() => {
+    const h = String(window.location.hash || '');
+    const q = h.includes('?') ? h.slice(h.indexOf('?') + 1) : '';
+    try { return new URLSearchParams(q).get('c'); } catch { return null; }
+  })();
+
+  // Desde el 2.1 el QR del jugador es una LIGA
+  // (…#/admin/escanear-cashback?c=CB1:xxxx) para que la cámara nativa del
+  // iPhone lo pueda abrir: Safari no trae el lector de códigos que usan
+  // Chrome y Android, así que dentro de la app nunca se podía escanear ahí.
+  // Aquí se acepta cualquiera de las dos formas: la liga nueva y el código
+  // pelón de los QR viejos (o de un screenshot guardado).
+  function limpiarCodigo(texto) {
+    const t = String(texto || '').trim();
+    if (!t) return '';
+    if (/^https?:\/\//i.test(t) || t.includes('?c=')) {
+      try {
+        const q = t.includes('?') ? t.slice(t.indexOf('?') + 1) : '';
+        const c = new URLSearchParams(q).get('c');
+        if (c) return c.trim();
+      } catch { /* si no se puede leer, se usa tal cual */ }
+    }
+    return t;
+  }
+
   let procesando = false;
-  async function procesarCodigo(texto) {
+  async function procesarCodigo(textoCrudo) {
+    const texto = limpiarCodigo(textoCrudo);
     if (!texto || procesando) return;
     procesando = true;
     try {
@@ -121,7 +150,22 @@ export async function renderAdminEscanearCashback() {
     if (!soportado) {
       camaraCard.style.display = 'none';
       estado.textContent = '';
-      pintarManual('Este navegador no puede leer QR automáticamente con la cámara. Escribe el código aquí, o abre esta pantalla desde Chrome en Android.');
+      pintarManual('Escribe aquí el código del cashback:');
+      // iPhone/Safari no traen el lector de QR del navegador. En vez de
+      // dejar a recepción tecleando, se le explica el camino que SÍ
+      // funciona en cualquier celular: la cámara normal del teléfono lee
+      // el QR del jugador (que ahora es una liga) y abre esta pantalla
+      // sola, con el cashback ya redimido.
+      camaraCard.replaceChildren(el('div', { style: 'padding:18px;' }, [
+        el('div', { style: 'font-size:34px;text-align:center;' }, '📷'),
+        el('div', { style: 'font-weight:800;font-size:15px;text-align:center;margin-top:6px;' },
+          'Usa la cámara normal de tu celular'),
+        el('p', { class: 'text-tiny mt-2', style: 'text-align:center;' },
+          'Este navegador (Safari en iPhone) no puede leer códigos QR por dentro. '
+          + 'Sal de la app, abre la app Cámara de tu celular y apunta al QR del jugador: '
+          + 'te va a salir un aviso para abrir la liga y el cashback se redime solo al abrirla.'),
+      ]));
+      camaraCard.style.background = 'var(--surface-2)';
       return;
     }
     try {
@@ -145,7 +189,19 @@ export async function renderAdminEscanearCashback() {
       pintarManual('No se pudo abrir la cámara (¿permiso denegado?). Escribe el código aquí mientras tanto.');
     }
   }
-  iniciarCamara();
+  if (codigoEnLaLiga) {
+    // Llegamos desde el QR: no hay nada que escanear, se redime directo.
+    estado.textContent = 'Leyendo el código del QR…';
+    camaraCard.style.display = 'none';
+    procesarCodigo(codigoEnLaLiga).finally(() => {
+      // Se limpia la dirección para que al recargar no intente redimir otra vez.
+      history.replaceState(null, '', window.location.pathname + '#/admin/escanear-cashback');
+      estado.textContent = '';
+      iniciarCamara();
+    });
+  } else {
+    iniciarCamara();
+  }
 
   // Si el jugador sale de esta pantalla, apagar la cámara — si no, queda
   // prendida "en secreto" consumiendo batería y dando una mala señal.

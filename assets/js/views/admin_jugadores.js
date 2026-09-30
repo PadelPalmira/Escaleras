@@ -1,8 +1,9 @@
 import { el, todayISO, formatFecha, formatFechaHora, toast, humanizeError, openSheet, confirmSheet, avatarContent, chipJugador } from '../utils.js';
 import { NIVELES } from '../niveles.js';
+import { icon } from '../icons.js';
 import {
   getMyProfile, esAdminOMaestro, buscarJugadores,
-  adminActualizarJugador, adminEliminarJugador, jugadorTieneHistorial,
+  adminActualizarJugador, adminEliminarJugador, jugadorTieneHistorial, crearJugadorAdmin,
   getRegistrosActivosDeJugador, asignarSustituto, asignarSustitutoAdmin, marcarNoShow, cancelarRegistro,
   aplicarMulta, marcarMultaEstado, getMisMultas,
   aplicarSuspension, levantarSuspension, getMisSuspensiones,
@@ -46,8 +47,15 @@ export async function renderAdminJugadores() {
     return el('div', { class: 'empty-state' }, [el('div', { class: 'emoji' }, '🔒'), el('p', {}, 'No tienes permiso para ver esta sección.')]);
   }
   const wrap = el('div');
-  wrap.appendChild(el('div', { class: 'h1 mb-2' }, 'Jugadores'));
-  wrap.appendChild(el('p', { class: 'text-muted mb-4' }, 'Toca a un jugador para asignar sustituto, aplicar una multa o una suspensión.'));
+  wrap.appendChild(el('div', { class: 'row-between mb-2' }, [
+    el('div', { class: 'h1' }, 'Jugadores'),
+    el('button', {
+      class: 'btn btn-primary btn-sm', style: 'width:auto;padding:8px 16px;font-size:20px;line-height:1;',
+      title: 'Dar de alta a un jugador',
+      onclick: () => abrirAltaJugador(() => renderAdminJugadores().then((n) => wrap.replaceWith(n))),
+    }, '+'),
+  ]));
+  wrap.appendChild(el('p', { class: 'text-muted mb-4' }, 'Toca a un jugador para asignar sustituto, aplicar una multa o una suspensión. Con el + das de alta a alguien que todavía no se registra.'));
 
   const search = el('input', { class: 'input mb-2', type: 'search', placeholder: 'Buscar jugador por nombre…', autocomplete: 'off' });
   search.value = ultimoFiltro;
@@ -155,6 +163,77 @@ async function pintarFicha(wrap, jugador) {
       el('button', { class: 'btn btn-ghost btn-sm', onclick: () => renderAdminJugadores().then((n) => wrap.replaceWith(n)) }, '← Volver a la búsqueda'),
     ]));
   }
+}
+
+/* WhatsApp directo al jugador desde su ficha. Los celulares mexicanos van
+   con 52 + los 10 dígitos, sin el "1" que ya no hace falta. */
+function waLinkJugador(jugador) {
+  const digitos = ((jugador && jugador.phone) || '').replace(/\D/g, '');
+  if (digitos.length !== 10) return null;
+  const nombre = (jugador.full_name || '').split(' ')[0];
+  const msg = `Hola${nombre ? ' ' + nombre : ''}, te escribimos de Padel Palmira 🎾`;
+  return `https://wa.me/52${digitos}?text=${encodeURIComponent(msg)}`;
+}
+
+/* ============================================================
+   Dar de alta a un jugador desde recepción (botón +).
+   ------------------------------------------------------------
+   Crear la CUENTA de alguien más no se puede hacer desde el
+   navegador (la tabla de perfiles cuelga de las cuentas de
+   acceso, y crear una necesita la llave de servicio), así que
+   esto pasa por una función servidor que vuelve a checar que
+   quien la llama sea Admin o Maestro.
+   El jugador queda con su correo ya confirmado y sin contraseña:
+   cuando quiera entra él solo, con contraseña o enlace mágico.
+   ============================================================ */
+function abrirAltaJugador(onListo) {
+  const email = el('input', { class: 'input', type: 'email', placeholder: 'sucorreo@ejemplo.com', autocomplete: 'off' });
+  const nombre = el('input', { class: 'input', type: 'text', placeholder: 'Nombre y apellido' });
+  const celular = el('input', { class: 'input', type: 'tel', placeholder: '10 dígitos' });
+  const nivel = el('select', { class: 'input' }, [
+    el('option', { value: '' }, 'Sin nivel declarado (lo pone él después)'),
+    ...NIVELES.map((n) => el('option', { value: n.value }, n.label)),
+  ]);
+
+  const content = el('div', {}, [
+    el('div', { class: 'sheet-title' }, 'Dar de alta a un jugador'),
+    el('p', { class: 'text-tiny mb-3' },
+      'Para cuando alguien llega al club y todavía no se registra. Le creamos su cuenta con su correo; '
+      + 'él entra cuando quiera, con contraseña o con el enlace mágico. Si le pones nivel, ya puede anotarse a una noche de inmediato.'),
+    el('div', { class: 'field' }, [el('label', {}, 'Correo electrónico'), email]),
+    el('div', { class: 'field' }, [el('label', {}, 'Nombre completo'), nombre]),
+    el('div', { class: 'field' }, [el('label', {}, 'Celular'), celular]),
+    el('div', { class: 'field' }, [el('label', {}, 'Nivel de juego'), nivel]),
+  ]);
+
+  const msg = el('p', { class: 'text-tiny mt-2' });
+  const btn = el('button', { class: 'btn btn-primary mt-2' }, 'Dar de alta');
+  btn.addEventListener('click', async () => {
+    const correo = (email.value || '').trim();
+    if (!correo.includes('@')) { msg.textContent = 'Escribe un correo válido.'; msg.style.color = 'var(--danger)'; return; }
+    if ((nombre.value || '').trim().length < 3) { msg.textContent = 'Escribe el nombre completo.'; msg.style.color = 'var(--danger)'; return; }
+    if ((celular.value || '').replace(/\D/g, '').length !== 10) { msg.textContent = 'El celular debe tener 10 dígitos.'; msg.style.color = 'var(--danger)'; return; }
+    btn.disabled = true; btn.textContent = 'Dando de alta…';
+    try {
+      const r = await crearJugadorAdmin({
+        email: correo,
+        fullName: nombre.value,
+        phone: celular.value,
+        declaredLevel: nivel.value || null,
+      });
+      toast(`${r.full_name} ya está dado de alta.`, 'success', 5000);
+      handle.close();
+      onListo();
+    } catch (err) {
+      msg.textContent = humanizeError(err);
+      msg.style.color = 'var(--danger)';
+      btn.disabled = false; btn.textContent = 'Dar de alta';
+    }
+  });
+  content.appendChild(btn);
+  content.appendChild(msg);
+  content.appendChild(el('button', { class: 'btn btn-ghost mt-2', onclick: () => handle.close() }, 'Cancelar'));
+  const handle = openSheet(content);
 }
 
 function nombreNivel(valor) {
@@ -295,6 +374,15 @@ async function cargarFicha(wrap, jugador) {
     jugador.phone ? el('div', { class: 'text-tiny mt-1' }, `Cel. ${jugador.phone}`) : null,
     jugador.declared_level ? el('div', { class: 'text-tiny mt-1' }, nombreNivel(jugador.declared_level)) : null,
     jugador.status !== 'active' ? el('span', { class: 'badge badge-warning mt-2' }, jugador.status === 'suspended' ? 'Suspendido' : 'Archivado') : null,
+    // Escribirle por WhatsApp es lo que recepción hace todo el tiempo:
+    // "oye, ¿sí vienes?", "te esperamos", "se abrió un lugar". Antes había
+    // que salirse de la app a buscar el número.
+    waLinkJugador(jugador)
+      ? el('a', {
+          class: 'btn btn-secondary mt-3', href: waLinkJugador(jugador), target: '_blank', rel: 'noopener',
+          style: 'display:flex;align-items:center;justify-content:center;gap:8px;',
+        }, [el('span', { html: icon.whatsapp, style: 'width:18px;height:18px;' }), 'Escribirle por WhatsApp'])
+      : el('p', { class: 'text-tiny mt-3', style: 'color:var(--text-tertiary);' }, 'Sin celular guardado: agrégaselo en "Editar datos" para poder escribirle por WhatsApp.'),
     el('div', { class: 'btn-row mt-3' }, [
       el('button', { class: 'btn btn-secondary btn-sm', onclick: () => abrirEditarJugador(jugador, refresh) }, 'Editar datos'),
       el('button', { class: 'btn btn-danger btn-sm', onclick: () => abrirDarDeBaja(jugador, wrap) }, 'Dar de baja'),

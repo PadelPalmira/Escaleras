@@ -30,8 +30,13 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
   const dots = el('div', { class: 'guia-dots' });
   slides.forEach((_, i) => dots.appendChild(el('span', { class: `guia-dot${i === 0 ? ' active' : ''}` })));
 
+  // A un jugador nuevo esta guía NO se le puede saltar: es donde se entera
+  // de que hay dos formatos distintos y de qué día es cada uno. En la
+  // primera semana real varios se anotaron a Parejas creyendo que iban
+  // solos. A quien ya jugaba antes sí se le deja saltar.
   const skipLink = el('button', { class: 'guia-skip', type: 'button' }, 'Saltar');
   skipLink.addEventListener('click', finish);
+  if (esNuevo) skipLink.style.display = 'none';
 
   const header = el('div', { class: 'guia-header' }, [dots, skipLink]);
   const slideHost = el('div', { class: 'guia-slide-host' });
@@ -81,6 +86,8 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
         ['Lunes a jueves de 8:00 a 10:00 pm, y los viernes Retas Abiertas de 7:00 a 11:00 pm, en las 3 canchas del club.', 'Dentro de esas 2 horas se juegan varias rondas de 15 minutos, rotando de cancha y de rival — casi nadie repite el mismo cruce dos veces en la misma noche.']
       )),
     });
+
+    arr.push({ render: () => Promise.resolve(slideFormatos()) });
 
     arr.push({
       render: () => Promise.resolve(slideCard(
@@ -166,6 +173,44 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
     }
     card.appendChild(box);
     card.appendChild(el('p', { class: 'text-tiny text-muted mt-3' }, 'No es definitivo — es solo para empezar. Tu lugar real en cada categoría se calcula con tus resultados, y puedes cambiar de convocatoria cuando quieras.'));
+    return card;
+  }
+
+  /* Los DOS formatos, lado a lado. Es la pantalla más importante de la
+     guía: el error más común de la primera semana fue anotarse a una noche
+     de Parejas Fijas creyendo que se jugaba como Individual. */
+  function slideFormatos() {
+    const card = el('div', {});
+    card.appendChild(el('div', { class: 'guia-icon' }, [el('span', { html: icon.calendar })]));
+    card.appendChild(el('div', { class: 'h2 mt-4 mb-1' }, 'Hay DOS formatos'));
+    card.appendChild(el('p', { class: 'text-muted mb-3', style: 'font-size:14px;' },
+      'No es lo mismo un lunes que un miércoles. Antes de anotarte, fíjate siempre qué formato tiene esa noche.'));
+
+    const bloque = (color, titulo, dias, puntos) => {
+      const box = el('div', { class: 'card mt-2', style: `background:var(--surface-2);border-left:4px solid ${color};` });
+      box.appendChild(el('div', { style: `font-weight:800;font-size:15px;color:${color};` }, titulo));
+      box.appendChild(el('div', { class: 'text-tiny', style: 'font-weight:700;margin-top:2px;' }, dias));
+      const ul = el('ul', { class: 'lista-reglas mt-2' });
+      puntos.forEach((t) => ul.appendChild(el('li', {}, t)));
+      box.appendChild(ul);
+      return box;
+    };
+
+    card.appendChild(bloque('var(--cyan)', 'INDIVIDUAL', 'Lunes (Cat A) y martes (Cat B)', [
+      'Te anotas TÚ SOLO, no necesitas traer pareja.',
+      'Siempre juegas 2 contra 2, pero la app te cambia de compañero en cada ronda.',
+      'Tu compañero de la ronda pasada pasa a ser tu rival.',
+    ]));
+
+    card.appendChild(bloque('var(--pink)', 'PAREJAS FIJAS', 'Miércoles (Cat A) y jueves (Cat B)', [
+      'Llegas CON TU PAREJA y juegas toda la noche con ella.',
+      'Se anota uno y elige al otro; tu pareja tiene 2 horas para aceptar.',
+      'Si no acepta, se libera el lugar de los dos — hay que volver a intentarlo.',
+      'Aquí no hay sustitutos: si uno no puede, se cae la pareja completa.',
+    ]));
+
+    card.appendChild(el('p', { class: 'text-tiny mt-3', style: 'color:var(--text-tertiary);' },
+      'Los viernes son Retas Abiertas: nivel libre, sin cupo y sin puntos — llegas y juegas.'));
     return card;
   }
 

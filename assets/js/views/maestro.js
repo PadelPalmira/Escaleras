@@ -4,7 +4,7 @@ import {
   getSystemSettingsAll, updateSystemSetting, getWeekdayScheduleAll, updateWeekdaySchedule,
   crearWeekdaySchedule, borrarWeekdaySchedule,
   getStaff, setProfileRole, buscarJugadores, generarEscalerasSemana, getProximasEscaleras,
-  getReporteCashbacksMes,
+  getReporteCashbacksMes, cambiarFormatoWeekday,
 } from '../api.js';
 
 const WEEKDAY_LABEL = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', domingo: 'Domingo' };
@@ -189,6 +189,42 @@ function renderWeekdayRow(ws, refresh) {
   });
 
   const btnRow = el('div', { class: 'mt-1', style: 'display:flex;gap:8px;flex-wrap:wrap;' }, [saveBtn]);
+
+  // ---- Cambiar el formato de este día, para siempre (2.1) ----
+  // El cupo, las canchas y el horario ya se editaban aquí, pero el formato
+  // no: cambiar un miércoles de Parejas a Individual obligaba a tocar la
+  // base. Ahora es un botón, y arrastra a las noches que todavía no se juegan.
+  if (ws.format !== 'retas_abiertas') {
+    const destino = ws.format === 'individual' ? 'parejas' : 'individual';
+    const destinoLbl = FORMAT_LABEL[destino];
+    const fmtBtn = el('button', { class: 'btn btn-ghost btn-sm', style: 'width:auto;color:var(--cyan);' },
+      `Cambiar a ${destinoLbl}`);
+    fmtBtn.addEventListener('click', async () => {
+      const ok = await confirmSheet({
+        title: `¿Los ${WEEKDAY_LABEL[ws.weekday].toLowerCase()}${ws.category ? ' de Cat ' + ws.category : ''} pasan a ${destinoLbl}?`,
+        body: `Este cambio es PERMANENTE: de aquí en adelante todas las convocatorias de ese día se van a crear en ${destinoLbl}. `
+          + `También se cambian las noches que ya están convocadas y todavía no se juegan. `
+          + (destino === 'parejas'
+              ? 'Ojo: a quien ya esté anotado en esas noches se le libera el lugar sin penalización y se le avisa, porque en Parejas nadie puede jugar solo.'
+              : 'Quien ya esté anotado en esas noches conserva su lugar; solo se deshacen las parejas y se les avisa.'),
+        confirmLabel: `Sí, cambiar a ${destinoLbl}`,
+        danger: destino === 'parejas',
+      });
+      if (!ok) return;
+      fmtBtn.disabled = true; fmtBtn.textContent = 'Cambiando…';
+      try {
+        const r = await cambiarFormatoWeekday(ws.id, destino, true);
+        toast(`Los ${WEEKDAY_LABEL[ws.weekday].toLowerCase()} ahora son ${destinoLbl}.`
+          + (r && r.noches_actualizadas ? ` Se actualizaron ${r.noches_actualizadas} noche(s) ya convocadas.` : '')
+          + (r && r.jugadores_liberados ? ` Se liberó a ${r.jugadores_liberados} jugador(es).` : ''), 'success', 7000);
+        refresh();
+      } catch (err) {
+        toast(humanizeError(err), 'error', 6000);
+        fmtBtn.disabled = false; fmtBtn.textContent = `Cambiar a ${destinoLbl}`;
+      }
+    });
+    btnRow.appendChild(fmtBtn);
+  }
 
   if (ws.escaleras_generadas === 0) {
     const delBtn = el('button', { class: 'btn btn-ghost btn-sm', style: 'width:auto;color:var(--danger);' }, 'Borrar horario');

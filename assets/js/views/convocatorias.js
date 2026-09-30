@@ -1,6 +1,6 @@
 import {
   el, formatFecha, formatHora, formatFechaHora, toast, humanizeError, openSheet, confirmSheet, chipJugador,
-  mailtoLinkInvitarPareja, minutosRestantes, avatarContent,
+  mailtoLinkInvitarPareja, minutosRestantes, avatarContent, formatPuntos,
 } from '../utils.js';
 import { icon } from '../icons.js';
 import {
@@ -10,8 +10,10 @@ import {
   responderInvitacionPareja, getJugadoresParaPareja,
   invitarParejaPorCorreo, cancelarInvitacionPareja, cancelarInvitacionCorreo,
   registrarseRetasAbiertas, salirRetasAbiertas, getInscritosRetas,
-  miResultadoNoche, getInscritosEscalera,
+  miResultadoNoche, getInscritosEscalera, getTablaNoche,
 } from '../api.js';
+import { navigate } from '../router.js';
+import { APP_URL } from '../config.js';
 import { generarTarjetaResultadoJugador, compartirTarjeta } from '../vendor/sharecard.js';
 
 const FORMAT_LABEL = { individual: 'Individual', parejas: 'Parejas Fijas', retas_abiertas: 'Retas Abiertas' };
@@ -163,6 +165,14 @@ function renderTarjeta(f, profile, refresh, avisoArriba) {
 
   card.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' }, FORMAT_HINT[f.formato]));
 
+  // Toda la noche tiene su propia página: quiénes van, el reglamento del
+  // formato, cuántos faltan y, cuando ya se jugó, cómo quedó todo mundo.
+  card.appendChild(el('button', {
+    class: 'btn btn-ghost btn-sm mt-2',
+    style: 'width:auto;padding-left:0;font-weight:700;color:var(--cyan);',
+    onclick: () => navigate('/convocatoria?id=' + f.escalera_id),
+  }, 'Ver esta noche completa →'));
+
   // Noche cancelada: antes simplemente desaparecía de la lista y el jugador
   // se quedaba sin saber si seguía en pie. Ahora se queda a la vista, con su
   // motivo, hasta que pasa el día.
@@ -283,11 +293,19 @@ function filaJugador(g, num, f, esEspera = false) {
 function renderCupo(f) {
   const cap = f.capacidad || 12;
   const pct = Math.min(100, Math.round((f.ocupados / cap) * 100));
+  // En Parejas Fijas el cupo se cuenta en PAREJAS: son los mismos 12 lugares
+  // en 3 canchas, pero decir "12 lugares" confunde — solo caben 6 parejas.
+  const esParejas = f.formato === 'parejas';
+  const total = esParejas ? Math.floor(cap / 2) : cap;
+  const van = esParejas ? Math.floor(f.ocupados / 2) : f.ocupados;
+  const espera = esParejas ? Math.ceil(f.en_espera / 2) : f.en_espera;
   const box = el('div', { class: 'mt-3' });
   box.appendChild(el('div', { class: 'row-between text-tiny' }, [
-    el('span', {}, `${f.ocupados} de ${cap} lugares`),
+    el('span', {}, `${van} de ${total} ${esParejas ? 'parejas' : 'lugares'}`),
     el('span', { style: 'color:var(--text-tertiary);' },
-      f.en_espera > 0 ? `${f.en_espera} en lista de espera` : 'Sin lista de espera'),
+      espera > 0
+        ? `${espera} en lista de espera`
+        : 'Sin lista de espera'),
   ]));
   box.appendChild(
     el('div', { class: 'cupo-bar mt-1' }, [
@@ -376,6 +394,36 @@ function renderAcciones(f, profile, refresh) {
     acciones.appendChild(el('div', { class: 'aviso aviso-ok' },
       `${f.mi_sustituto_nombre} juega en tu lugar esta noche.`));
     return acciones;
+  }
+
+  // Se me venció la invitación de pareja: nos tumbó el lugar a los dos y
+  // antes aquí no salía NADA — el jugador se quedaba sin saber qué pasó ni
+  // qué hacer. Ahora se le explica y se le deja volver a invitar de un toque.
+  if (!tengoLugar && !enEspera && f.mi_partner_status === 'vencida' && f.formato === 'parejas'
+      && f.esc_status === 'scheduled') {
+    const aviso = el('div', { class: 'aviso aviso-warn' }, [
+      el('strong', {}, 'Se venció la invitación de pareja. '),
+      f.mi_partner_nombre
+        ? `${f.mi_partner_nombre} no aceptó dentro del plazo, así que se liberó el lugar de los dos. Puedes volver a invitarlo o anotarte con alguien más.`
+        : 'Tu pareja no aceptó dentro del plazo, así que se liberó el lugar de los dos. Puedes volver a intentarlo.',
+    ]);
+    acciones.appendChild(aviso);
+    if (f.mi_partner_id && f.mi_partner_nombre) {
+      const btn = el('button', { class: 'btn btn-primary mt-2' }, `Volver a invitar a ${f.mi_partner_nombre}`);
+      btn.addEventListener('click', async () => {
+        btn.disabled = true; btn.textContent = 'Invitando…';
+        try {
+          const res = await registrarJugador(f.escalera_id, profile.id, f.mi_partner_id, false);
+          toast(res.mensaje || 'Invitación mandada de nuevo.', 'success', 5200);
+          refresh();
+        } catch (err) {
+          toast(humanizeError(err), 'error', 6000);
+          btn.disabled = false; btn.textContent = `Volver a invitar a ${f.mi_partner_nombre}`;
+        }
+      });
+      acciones.appendChild(btn);
+    }
+    // …y abajo siguen las opciones normales para anotarse con otra pareja.
   }
 
   // Me propusieron como sustituto y todavía no contesto: no ocupo lugar ni
@@ -948,4 +996,352 @@ function renderRetas(f, profile, refresh) {
   });
 
   return box;
+}
+
+/* ============================================================================
+   LA PÁGINA DE UNA NOCHE  (deployment 2.1)
+   ----------------------------------------------------------------------------
+   Todo lo de esa noche en un solo lugar: cómo se juega ese formato, quiénes
+   van (en Parejas, la pareja completa como una sola entrada), cuántos faltan,
+   la lista de espera con su orden, la invitación por WhatsApp para jalar
+   gente, y — cuando ya se jugó — cómo quedó todo mundo con sus puntos y sus
+   cashbacks.
+   ============================================================================ */
+
+const FORMATO_EXPLICADO = {
+  individual: {
+    titulo: 'Individual — te anotas solo',
+    puntos: [
+      'No necesitas traer pareja: te anotas tú solo.',
+      'Siempre se juega 2 contra 2, pero la app te asigna un compañero distinto en cada ronda.',
+      'Tu compañero de la ronda anterior pasa a ser tu rival en la siguiente.',
+      'Si ganas subes de cancha con tu compañero; si pierdes, bajan los dos.',
+      'Si al final no puedes ir, tú mismo eliges a tu sustituto desde la app.',
+    ],
+  },
+  parejas: {
+    titulo: 'Parejas Fijas — llegas con tu pareja',
+    puntos: [
+      'Se anota uno de los dos y elige a su pareja; al otro le llega la invitación.',
+      'Hasta que los DOS estén dentro, la pareja no queda registrada.',
+      'La pareja invitada tiene 2 horas para aceptar: si no, se libera el lugar de los dos.',
+      'Juegan toda la noche juntos y suben o bajan de cancha juntos.',
+      'Aquí no hay sustitutos: si uno no puede ir, se cae la pareja completa.',
+    ],
+  },
+  retas_abiertas: {
+    titulo: 'Retas Abiertas — noche libre',
+    puntos: [
+      'Nivel libre, sin categorías y sin cupo: llegas y juegas.',
+      'No reparte puntos, ni ranking, ni cashback.',
+      'Formato "rey de la cancha": se juega a 4 games, el que gana se queda.',
+      'Anotarte aquí no aparta lugar: es para que el club vea cuántos van.',
+    ],
+  },
+};
+
+function idDeLaUrl() {
+  const hash = String(window.location.hash || '');
+  const q = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '';
+  return new URLSearchParams(q).get('id');
+}
+
+export async function renderConvocatoriaDetalle() {
+  const escaleraId = idDeLaUrl();
+  const wrap = el('div');
+
+  if (!escaleraId) {
+    wrap.appendChild(el('div', { class: 'empty-state' }, [
+      el('div', { class: 'emoji' }, '🤔'),
+      el('p', {}, 'No encontramos esa noche.'),
+      el('button', { class: 'btn btn-secondary mt-3', onclick: () => navigate('/convocatorias') }, 'Ver las convocatorias'),
+    ]));
+    return wrap;
+  }
+
+  const [profile, filas] = await Promise.all([getMyProfile(), getMisConvocatorias(9)]);
+  const f = (filas || []).find((x) => x.escalera_id === escaleraId);
+
+  wrap.appendChild(el('button', {
+    class: 'btn btn-ghost btn-sm mb-2', style: 'width:auto;padding-left:0;',
+    onclick: () => navigate('/convocatorias'),
+  }, '← Todas las convocatorias'));
+
+  if (!f) {
+    wrap.appendChild(el('div', { class: 'empty-state' }, [
+      el('div', { class: 'emoji' }, '📅'),
+      el('p', {}, 'Esa noche ya no está en la lista de la semana.'),
+      el('p', { class: 'text-tiny mt-2' }, 'Las noches se pueden ver desde el día que se convocan hasta que pasan.'),
+    ]));
+    return wrap;
+  }
+
+  const refresh = () => renderConvocatoriaDetalle().then((n) => wrap.replaceWith(n));
+  const cancelada = f.esc_status === 'cancelled';
+  const enJuego = f.esc_status === 'in_progress';
+  const yaCerro = f.esc_status === 'completed';
+  const esParejas = f.formato === 'parejas';
+
+  /* ---------- Encabezado ---------- */
+  const st = f.mi_status ? STATUS_LABEL[f.mi_status] : null;
+  const tengoRegistroActivo = f.mi_status && ACTIVO.includes(f.mi_status);
+  wrap.appendChild(el('div', { class: 'card' }, [
+    el('div', { class: 'row-between' }, [
+      el('div', {}, [
+        el('div', { class: 'h2' }, formatFecha(f.session_date)),
+        el('div', { class: 'text-tiny mt-1' },
+          `${FORMAT_LABEL[f.formato]}${f.categoria ? ' · Categoría ' + f.categoria : ''}`),
+        el('div', { class: 'text-tiny' }, `${formatHora(f.start_time)} – ${formatHora(f.end_time)} · 3 canchas`),
+      ]),
+      st && (tengoRegistroActivo || f.mi_sustituto_nombre)
+        ? el('span', { class: `badge ${st.cls}` }, st.text) : null,
+    ]),
+    cancelada ? el('div', { class: 'aviso aviso-danger mt-3' }, [
+      el('strong', {}, 'Esta noche se canceló. '),
+      'Nadie recibe penalización ni pierde puntos.',
+    ]) : null,
+    enJuego ? el('div', { class: 'aviso aviso-ok mt-3' }, [el('strong', {}, 'Se está jugando ahora mismo. '), 'Abajo ves cómo van en vivo.']) : null,
+  ]));
+
+  /* ---------- Cupo (en Parejas se cuenta por parejas, no por personas) ---------- */
+  if (!cancelada && f.formato !== 'retas_abiertas') {
+    const cap = f.capacidad || 12;
+    const unidadTotal = esParejas ? Math.floor(cap / 2) : cap;
+    const unidadVan = esParejas ? Math.floor(f.ocupados / 2) : f.ocupados;
+    const faltan = Math.max(unidadTotal - unidadVan, 0);
+    const pct = Math.min(100, Math.round((unidadVan / unidadTotal) * 100));
+    const box = el('div', { class: 'card mt-3' });
+    box.appendChild(el('div', { class: 'row-between' }, [
+      el('div', { style: 'font-weight:800;font-size:15px;' },
+        `${unidadVan} de ${unidadTotal} ${esParejas ? 'parejas' : 'lugares'}`),
+      el('span', { class: `badge ${faltan === 0 ? 'badge-success' : 'badge-warning'}` },
+        faltan === 0 ? 'Cupo lleno' : `Faltan ${faltan}`),
+    ]));
+    box.appendChild(el('div', { class: 'cupo-bar mt-2' }, [
+      el('div', { class: `cupo-bar-fill${faltan === 0 ? ' full' : ''}`, style: `width:${pct}%;` }),
+    ]));
+    if (esParejas) {
+      box.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' },
+        `Son ${cap} jugadores en 3 canchas, o sea ${unidadTotal} parejas. Cada pareja ocupa dos lugares.`));
+    }
+    if (f.en_espera > 0) {
+      box.appendChild(el('p', { class: 'text-tiny mt-1' },
+        `${f.en_espera} ${f.en_espera === 1 ? 'anotado' : 'anotados'} en lista de espera.`));
+    }
+    wrap.appendChild(box);
+  }
+
+  /* ---------- Mis acciones (las mismas de la tarjeta) ---------- */
+  if (!cancelada) {
+    wrap.appendChild(renderAcciones(f, profile, refresh));
+  }
+
+  /* ---------- Cómo se juega esta noche ---------- */
+  const expl = FORMATO_EXPLICADO[f.formato];
+  if (expl) {
+    wrap.appendChild(el('div', { class: 'section-title' }, 'Cómo se juega esta noche'));
+    const card = el('div', { class: 'card' });
+    card.appendChild(el('div', { style: 'font-weight:800;font-size:14.5px;' }, expl.titulo));
+    const ul = el('ul', { class: 'lista-reglas mt-2' });
+    expl.puntos.forEach((p) => ul.appendChild(el('li', {}, p)));
+    card.appendChild(ul);
+    card.appendChild(el('button', {
+      class: 'btn btn-ghost btn-sm mt-2', style: 'width:auto;padding-left:0;color:var(--cyan);font-weight:700;',
+      onclick: () => navigate('/reglas'),
+    }, 'Ver el reglamento completo →'));
+    wrap.appendChild(card);
+  }
+
+  /* ---------- Quiénes van ---------- */
+  if (!cancelada) {
+    wrap.appendChild(el('div', { class: 'section-title' }, 'Quiénes van'));
+    const listaBox = el('div', { class: 'card' });
+    listaBox.appendChild(el('p', { class: 'text-tiny' }, 'Cargando…'));
+    wrap.appendChild(listaBox);
+    pintarInscritos(listaBox, f).catch(() => {
+      listaBox.innerHTML = '';
+      listaBox.appendChild(el('p', { class: 'text-muted' }, 'No se pudo cargar la lista.'));
+    });
+  }
+
+  /* ---------- Invitar por WhatsApp ---------- */
+  if (!cancelada && !yaCerro && !enJuego) {
+    wrap.appendChild(renderInvitarWhatsapp(f));
+  }
+
+  /* ---------- Cómo van / cómo quedaron ---------- */
+  if (enJuego || yaCerro) {
+    wrap.appendChild(el('div', { class: 'section-title' }, yaCerro ? 'Cómo quedaron' : 'Cómo van en vivo'));
+    const tablaBox = el('div', { class: 'card' });
+    tablaBox.appendChild(el('p', { class: 'text-tiny' }, 'Cargando…'));
+    wrap.appendChild(tablaBox);
+    pintarTablaNoche(tablaBox, f, { enVivo: enJuego }).catch(() => {
+      tablaBox.innerHTML = '';
+      tablaBox.appendChild(el('p', { class: 'text-muted' }, 'No se pudo cargar la tabla de la noche.'));
+    });
+  }
+
+  return wrap;
+}
+
+/* Lista de inscritos. En Parejas Fijas los dos jugadores de una pareja salen
+   como UNA sola entrada — antes salía solo quien se había anotado y su pareja
+   no aparecía por ningún lado. */
+async function pintarInscritos(box, f) {
+  const gente = await getInscritosEscalera(f.escalera_id);
+  box.innerHTML = '';
+  if (!gente.length) {
+    box.appendChild(el('p', { class: 'text-muted' }, 'Todavía no se anota nadie — sé el primero.'));
+    return;
+  }
+
+  const esParejas = f.formato === 'parejas';
+  const dentro = gente.filter((g) => g.status !== 'waitlist');
+  const espera = gente.filter((g) => g.status === 'waitlist');
+
+  const pintaGrupo = (lista, esperando) => {
+    if (esParejas) {
+      // Cada pareja son DOS filas en la base (una por jugador). Aquí se
+      // juntan en una sola entrada, y si alguno de los dos todavía no
+      // acepta, esa es la fila que manda — es el dato importante.
+      const porPareja = new Map();
+      lista.forEach((g) => {
+        const previo = porPareja.get(g.pareja_key);
+        if (!previo || (g.partner_status === 'pending' && previo.partner_status !== 'pending')) {
+          porPareja.set(g.pareja_key, g);
+        }
+      });
+      let n = 0;
+      porPareja.forEach((g) => { n += 1; box.appendChild(filaPareja(g, n, esperando)); });
+      if (n === 0 && !esperando) box.appendChild(el('p', { class: 'text-muted' }, 'Todavía no hay parejas anotadas.'));
+    } else {
+      lista.forEach((g, i) => box.appendChild(filaSolo(g, esperando ? (g.posicion_espera || i + 1) : i + 1, esperando)));
+    }
+  };
+
+  pintaGrupo(dentro, false);
+
+  if (espera.length) {
+    box.appendChild(el('div', { class: 'text-tiny mt-3', style: 'font-weight:800;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);' },
+      `Lista de espera (${esParejas ? Math.ceil(espera.length / 2) : espera.length})`));
+    box.appendChild(el('p', { class: 'text-tiny', style: 'color:var(--text-tertiary);' },
+      'Si alguien se da de baja, entran en este orden.'));
+    pintaGrupo(espera, true);
+  }
+}
+
+function filaSolo(g, num, esEspera) {
+  const etiquetas = [];
+  if (g.status === 'substitute') etiquetas.push(g.sustituye_a ? `sustituto de ${g.sustituye_a}` : 'sustituto');
+  return el('div', { class: 'list-row' }, [
+    el('span', { class: 'rank', style: esEspera ? 'color:var(--warning);' : '' }, String(num)),
+    el('span', { class: 'avatar' }, avatarContent(g)),
+    el('div', { style: 'min-width:0;' }, [
+      el('div', { class: 'name' }, g.full_name),
+      etiquetas.length ? el('div', { class: 'meta' }, etiquetas.join(' · ')) : null,
+    ]),
+  ]);
+}
+
+function filaPareja(g, num, esEspera) {
+  // OJO con quién es quién: la fila que trae partner_status='pending' es la
+  // del jugador INVITADO (el que todavía no acepta), y su "partner_nombre"
+  // es quien lo invitó. Decirlo al revés sería señalar al que sí confirmó.
+  const pendiente = g.partner_status === 'pending';
+  const invitado = pendiente ? g.full_name : null;
+  const nombres = g.partner_nombre
+    ? (pendiente ? `${g.partner_nombre} + ${g.full_name}` : `${g.full_name} + ${g.partner_nombre}`)
+    : g.full_name;
+  return el('div', { class: 'list-row' }, [
+    el('span', { class: 'rank', style: esEspera ? 'color:var(--warning);' : '' }, String(num)),
+    el('span', { class: 'avatar' }, avatarContent(pendiente ? { full_name: g.partner_nombre, avatar_url: g.partner_avatar } : g)),
+    el('span', { class: 'avatar', style: 'margin-left:-14px;border:2px solid var(--surface);' },
+      avatarContent(pendiente ? g : { full_name: g.partner_nombre, avatar_url: g.partner_avatar })),
+    el('div', { style: 'min-width:0;margin-left:4px;' }, [
+      el('div', { class: 'name' }, nombres),
+      pendiente
+        ? el('div', { class: 'meta', style: 'color:var(--warning);' },
+            `${invitado} todavía no acepta${g.expira_en ? ' · ' + textoTiempoRestante(g.expira_en) : ''}`)
+        : (!g.partner_nombre ? el('div', { class: 'meta', style: 'color:var(--warning);' }, 'Le falta pareja') : null),
+    ]),
+  ]);
+}
+
+/* Jalar gente por WhatsApp. A propósito NO se elige a quién: se abre WhatsApp
+   con el mensaje listo y cada quien escoge de sus propios contactos — así
+   nadie tiene que andar viendo los teléfonos de los demás. */
+function renderInvitarWhatsapp(f) {
+  const cap = f.capacidad || 12;
+  const esParejas = f.formato === 'parejas';
+  const faltanPersonas = Math.max(cap - f.ocupados, 0);
+  const faltan = esParejas ? Math.ceil(faltanPersonas / 2) : faltanPersonas;
+
+  const box = el('div', { class: 'card mt-3' });
+  box.appendChild(el('div', { style: 'font-weight:800;font-size:14.5px;' }, '¿Falta gente? Jálalos'));
+  box.appendChild(el('p', { class: 'text-tiny mt-1' },
+    f.formato === 'retas_abiertas'
+      ? 'Comparte la noche con quien quieras: en Retas Abiertas no hay cupo.'
+      : (faltan > 0
+          ? `Faltan ${faltan} ${esParejas ? (faltan === 1 ? 'pareja' : 'parejas') : (faltan === 1 ? 'lugar' : 'lugares')} para llenar la noche. Mándale el mensaje a quien quieras.`
+          : 'La noche ya está llena, pero puedes invitar a alguien a la lista de espera.')));
+
+  const partes = [
+    `🎾 ¡Vente a la escalera del ${formatFecha(f.session_date)}!`,
+    `${FORMAT_LABEL[f.formato]}${f.categoria ? ' · Categoría ' + f.categoria : ''} a las ${formatHora(f.start_time)} en Padel Palmira.`,
+  ];
+  if (f.formato !== 'retas_abiertas') {
+    partes.push(faltan > 0
+      ? `Faltan ${faltan} ${esParejas ? (faltan === 1 ? 'pareja' : 'parejas') : (faltan === 1 ? 'lugar' : 'lugares')}.`
+      : 'Ya está llena, pero te puedes anotar a la lista de espera.');
+  }
+  if (esParejas) partes.push('Es de Parejas Fijas, así que va uno y anota al otro.');
+  partes.push(`Anótate aquí: ${APP_URL}#/convocatoria?id=${f.escalera_id}`);
+
+  const link = `https://wa.me/?text=${encodeURIComponent(partes.join('\n'))}`;
+  box.appendChild(el('a', {
+    class: 'btn btn-secondary mt-2', href: link, target: '_blank', rel: 'noopener',
+    style: 'display:flex;align-items:center;justify-content:center;gap:8px;',
+  }, [el('span', { html: icon.whatsapp, style: 'width:18px;height:18px;' }), 'Invitar por WhatsApp']));
+  return box;
+}
+
+/* Tabla de la noche: en vivo mientras se juega y final cuando ya cerró.
+   La puede ver cualquiera, juegue o no esa noche — si estás peleando un
+   lugar de Liguilla quieres ver cómo les está yendo a los demás. */
+async function pintarTablaNoche(box, f, { enVivo }) {
+  const filas = await getTablaNoche(f.escalera_id);
+  box.innerHTML = '';
+  if (!filas.length) {
+    box.appendChild(el('p', { class: 'text-muted' }, 'Todavía no hay resultados capturados.'));
+    return;
+  }
+  filas.sort((a, b) => a.lugar - b.lugar);
+
+  if (enVivo) {
+    box.appendChild(el('p', { class: 'text-tiny mb-2', style: 'color:var(--text-tertiary);' },
+      'Se actualiza cada vez que recepción captura un marcador. Los puntos del bono de cierre se suman al final.'));
+  }
+
+  filas.forEach((r) => {
+    const medalla = r.lugar === 1 ? '🥇' : r.lugar === 2 ? '🥈' : r.lugar === 3 ? '🥉' : null;
+    box.appendChild(el('div', { class: 'list-row' }, [
+      el('span', { class: 'rank' }, medalla || String(r.lugar)),
+      el('span', { class: 'avatar' }, avatarContent(r)),
+      el('div', { style: 'min-width:0;' }, [
+        el('div', { class: 'name' }, r.full_name),
+        el('div', { class: 'meta' }, [
+          `${r.partidos_ganados}/${r.partidos_jugados} partidos · games ${r.games_favor}-${r.games_contra}`,
+          r.cancha_actual ? ` · cancha ${r.cancha_actual}` : '',
+          r.es_sustituto ? ' · sustituto' : '',
+        ].join('')),
+        r.cashback_mxn
+          ? el('div', { class: 'meta', style: 'color:var(--success);font-weight:700;' }, `Cashback $${Number(r.cashback_mxn)} MXN`)
+          : null,
+      ]),
+      el('span', { class: 'value' }, [
+        el('div', {}, formatPuntos(r.puntos)),
+        el('div', { class: 'text-tiny', style: 'font-weight:600;color:var(--text-tertiary);' }, 'pts'),
+      ]),
+    ]));
+  });
 }
