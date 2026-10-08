@@ -18,6 +18,7 @@ import { renderAdminEscaleras } from './views/admin_escaleras.js';
 import { renderAdminLiguilla } from './views/admin_liguilla.js';
 import { renderAdminJugadores } from './views/admin_jugadores.js';
 import { renderAdminEscanearCashback } from './views/admin_escanear_cashback.js';
+import { renderAdminCashbacks } from './views/admin_cashbacks.js';
 import { renderMaestro } from './views/maestro.js';
 
 // La Liguilla tiene pestaña propia porque es la meta del mes para todos:
@@ -205,6 +206,7 @@ async function showApp() {
   registerRoute('/admin/liguilla', renderAdminLiguilla);
   registerRoute('/admin/jugadores', renderAdminJugadores);
   registerRoute('/admin/escanear-cashback', renderAdminEscanearCashback);
+  registerRoute('/admin/cashbacks', renderAdminCashbacks);
   registerRoute('/maestro', renderMaestro);
   initRouter(viewEl, {
     onNavigateCb: (path) => { updateActiveNav(path); refrescarAvisos(profile); refrescarBrilloLiguilla(); },

@@ -55,6 +55,12 @@ export async function renderAdmin() {
     path: '/admin/liguilla',
   }));
   wrap.appendChild(menuCard({
+    titulo: 'Cashbacks cobrados',
+    descripcion: 'Qué cashbacks ya se redimieron, cuándo y quién los escaneó. Por mes.',
+    iconoSvg: icon.qrcode,
+    path: '/admin/cashbacks',
+  }));
+  wrap.appendChild(menuCard({
     titulo: 'Jugadores',
     descripcion: 'Busca a alguien para ponerle sustituto, una multa o una suspensión.',
     iconoSvg: icon.user,

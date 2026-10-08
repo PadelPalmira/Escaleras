@@ -11,6 +11,7 @@ import {
   invitarParejaPorCorreo, cancelarInvitacionPareja, cancelarInvitacionCorreo,
   registrarseRetasAbiertas, salirRetasAbiertas, getInscritosRetas,
   miResultadoNoche, getInscritosEscalera, getTablaNoche,
+  getConvocatoriasPasadas, getConvocatoriaInfo, getParejasDeNoche,
 } from '../api.js';
 import { navigate } from '../router.js';
 import { APP_URL } from '../config.js';
@@ -91,7 +92,44 @@ export async function renderConvocatorias() {
     wrap.appendChild(renderTarjeta(f, profile, refresh, sinRanking));
   }
 
+  // ---- Lo que ya se jugó ----
+  // Se carga aparte y hasta abajo: no estorba a lo de la semana, y deja ver
+  // cómo le fue a los demás aunque uno no haya jugado esa noche.
+  const pasadasBox = el('div', { class: 'mt-6' });
+  wrap.appendChild(pasadasBox);
+  pintarPasadas(pasadasBox).catch(() => { pasadasBox.innerHTML = ''; });
+
   return wrap;
+}
+
+async function pintarPasadas(box) {
+  const pasadas = await getConvocatoriasPasadas();
+  box.innerHTML = '';
+  if (!pasadas.length) return;
+
+  box.appendChild(el('div', { class: 'section-title' }, 'Ya se jugaron'));
+  box.appendChild(el('p', { class: 'text-tiny mb-2', style: 'color:var(--text-tertiary);' },
+    'Las noches de esta semana y la pasada. Entra a cualquiera para ver quiénes fueron y cómo quedaron, hayas jugado o no.'));
+
+  const card = el('div', { class: 'card', style: 'padding-top:4px;padding-bottom:4px;' });
+  pasadas.forEach((p) => {
+    const cancelada = p.esc_status === 'cancelled';
+    const jugue = ['confirmed', 'substitute'].includes(p.mi_status);
+    card.appendChild(el('button', {
+      class: 'list-row jug-row', type: 'button',
+      onclick: () => navigate('/convocatoria?id=' + p.escalera_id),
+    }, [
+      el('div', { style: 'min-width:0;flex:1;' }, [
+        el('div', { class: 'name' }, formatFecha(p.session_date)),
+        el('div', { class: 'meta' },
+          `${FORMAT_LABEL[p.formato] || p.formato}${p.categoria ? ' · Cat ' + p.categoria : ''}`
+          + (cancelada ? '' : ` · ${p.jugaron} ${p.jugaron === 1 ? 'jugador' : 'jugadores'}`)),
+      ]),
+      jugue ? el('span', { class: 'badge badge-success', style: 'margin-left:auto;' }, 'Jugaste') : null,
+      cancelada ? el('span', { class: 'badge badge-neutral', style: 'margin-left:auto;' }, 'Cancelada') : null,
+    ]));
+  });
+  box.appendChild(card);
 }
 
 /* ============================================================
@@ -1060,7 +1098,15 @@ export async function renderConvocatoriaDetalle() {
   }
 
   const [profile, filas] = await Promise.all([getMyProfile(), getMisConvocatorias(9)]);
-  const f = (filas || []).find((x) => x.escalera_id === escaleraId);
+  let f = (filas || []).find((x) => x.escalera_id === escaleraId);
+  // Las noches que ya pasaron no salen en "mis convocatorias", pero su
+  // página se tiene que poder abrir igual: para eso está convocatoria_info.
+  // En esas no hay nada que hacer, solo mirar.
+  let soloLectura = false;
+  if (!f) {
+    f = await getConvocatoriaInfo(escaleraId);
+    soloLectura = true;
+  }
 
   wrap.appendChild(el('button', {
     class: 'btn btn-ghost btn-sm mb-2', style: 'width:auto;padding-left:0;',
@@ -1070,8 +1116,7 @@ export async function renderConvocatoriaDetalle() {
   if (!f) {
     wrap.appendChild(el('div', { class: 'empty-state' }, [
       el('div', { class: 'emoji' }, '📅'),
-      el('p', {}, 'Esa noche ya no está en la lista de la semana.'),
-      el('p', { class: 'text-tiny mt-2' }, 'Las noches se pueden ver desde el día que se convocan hasta que pasan.'),
+      el('p', {}, 'No encontramos esa noche.'),
     ]));
     return wrap;
   }
@@ -1083,8 +1128,13 @@ export async function renderConvocatoriaDetalle() {
   const esParejas = f.formato === 'parejas';
 
   /* ---------- Encabezado ---------- */
-  const st = f.mi_status ? STATUS_LABEL[f.mi_status] : null;
-  const tengoRegistroActivo = f.mi_status && ACTIVO.includes(f.mi_status);
+  let st = f.mi_status ? STATUS_LABEL[f.mi_status] : null;
+  // En una noche que ya cerró, "Tienes lugar" se lee como si todavía fuera a
+  // jugarse. Lo que importa ahí es si jugaste o no.
+  if (yaCerro && ['confirmed', 'substitute'].includes(f.mi_status)) {
+    st = { text: 'Jugaste', cls: 'badge-success' };
+  }
+  const tengoRegistroActivo = (f.mi_status && ACTIVO.includes(f.mi_status)) || (yaCerro && st && st.text === 'Jugaste');
   wrap.appendChild(el('div', { class: 'card' }, [
     el('div', { class: 'row-between' }, [
       el('div', {}, [
@@ -1102,6 +1152,16 @@ export async function renderConvocatoriaDetalle() {
     ]) : null,
     enJuego ? el('div', { class: 'aviso aviso-ok mt-3' }, [el('strong', {}, 'Se está jugando ahora mismo. '), 'Abajo ves cómo van en vivo.']) : null,
   ]));
+
+  if (cancelada && (f.cancel_reason || f.cancelado_por)) {
+    wrap.appendChild(el('div', { class: 'card mt-2' }, [
+      el('div', { class: 'text-tiny' }, [
+        f.cancel_reason ? el('div', {}, `Motivo: ${f.cancel_reason}`) : null,
+        f.cancelled_at ? el('div', { class: 'mt-1' },
+          `Cancelada el ${formatFechaHora(f.cancelled_at)}${f.cancelado_por ? ' por ' + f.cancelado_por : ''}.`) : null,
+      ]),
+    ]));
+  }
 
   /* ---------- Cupo (en Parejas se cuenta por parejas, no por personas) ---------- */
   if (!cancelada && f.formato !== 'retas_abiertas') {
@@ -1132,8 +1192,16 @@ export async function renderConvocatoriaDetalle() {
   }
 
   /* ---------- Mis acciones (las mismas de la tarjeta) ---------- */
-  if (!cancelada) {
-    wrap.appendChild(renderAcciones(f, profile, refresh));
+  // OJO: las Retas del viernes tienen su propio flujo (anotarse/salir sin
+  // penalización). Mandarlas por renderAcciones las trataba como escalera
+  // normal y la baja pasaba por el camino de las penalizaciones — era el
+  // bug de "no me puedo dar de baja de las retas" del 2.1.
+  if (!cancelada && !soloLectura) {
+    if (f.formato === 'retas_abiertas') {
+      wrap.appendChild(renderRetas(f, profile, refresh));
+    } else {
+      wrap.appendChild(renderAcciones(f, profile, refresh));
+    }
   }
 
   /* ---------- Cómo se juega esta noche ---------- */
@@ -1309,7 +1377,11 @@ function renderInvitarWhatsapp(f) {
    La puede ver cualquiera, juegue o no esa noche — si estás peleando un
    lugar de Liguilla quieres ver cómo les está yendo a los demás. */
 async function pintarTablaNoche(box, f, { enVivo }) {
-  const filas = await getTablaNoche(f.escalera_id);
+  const esParejas = f.formato === 'parejas';
+  const [filas, parejas] = await Promise.all([
+    getTablaNoche(f.escalera_id),
+    esParejas ? getParejasDeNoche(f.escalera_id).catch(() => []) : Promise.resolve([]),
+  ]);
   box.innerHTML = '';
   if (!filas.length) {
     box.appendChild(el('p', { class: 'text-muted' }, 'Todavía no hay resultados capturados.'));
@@ -1317,31 +1389,57 @@ async function pintarTablaNoche(box, f, { enVivo }) {
   }
   filas.sort((a, b) => a.lugar - b.lugar);
 
+  // En Parejas Fijas los dos juegan siempre juntos, así que tienen los
+  // mismos puntos: ponerlos en renglones separados hacía ver 12 "lugares"
+  // donde en realidad hay 6 parejas peleando entre ellas.
+  if (esParejas && parejas.length) {
+    const porJugador = new Map(parejas.map((p) => [p.player_id, p]));
+    const vistos = new Set();
+    const agrupadas = [];
+    filas.forEach((r) => {
+      const info = porJugador.get(r.player_id);
+      const clave = (info && info.pareja_key) || r.player_id;
+      if (vistos.has(clave)) return;
+      vistos.add(clave);
+      agrupadas.push({ ...r, pareja_nombre: info && info.partner_nombre });
+    });
+    agrupadas.forEach((r, i) => box.appendChild(filaTablaNoche(r, i + 1, true)));
+    if (enVivo) {
+      box.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' },
+        'Cada pareja suma lo mismo: juegan juntos toda la noche.'));
+    }
+    return;
+  }
+
   if (enVivo) {
     box.appendChild(el('p', { class: 'text-tiny mb-2', style: 'color:var(--text-tertiary);' },
       'Se actualiza cada vez que recepción captura un marcador. Los puntos del bono de cierre se suman al final.'));
   }
 
-  filas.forEach((r) => {
-    const medalla = r.lugar === 1 ? '🥇' : r.lugar === 2 ? '🥈' : r.lugar === 3 ? '🥉' : null;
-    box.appendChild(el('div', { class: 'list-row' }, [
-      el('span', { class: 'rank' }, medalla || String(r.lugar)),
-      el('span', { class: 'avatar' }, avatarContent(r)),
-      el('div', { style: 'min-width:0;' }, [
-        el('div', { class: 'name' }, r.full_name),
-        el('div', { class: 'meta' }, [
-          `${r.partidos_ganados}/${r.partidos_jugados} partidos · games ${r.games_favor}-${r.games_contra}`,
-          r.cancha_actual ? ` · cancha ${r.cancha_actual}` : '',
-          r.es_sustituto ? ' · sustituto' : '',
-        ].join('')),
-        r.cashback_mxn
-          ? el('div', { class: 'meta', style: 'color:var(--success);font-weight:700;' }, `Cashback $${Number(r.cashback_mxn)} MXN`)
-          : null,
-      ]),
-      el('span', { class: 'value' }, [
-        el('div', {}, formatPuntos(r.puntos)),
-        el('div', { class: 'text-tiny', style: 'font-weight:600;color:var(--text-tertiary);' }, 'pts'),
-      ]),
-    ]));
-  });
+  filas.forEach((r) => box.appendChild(filaTablaNoche(r, r.lugar, false)));
+}
+
+function filaTablaNoche(r, lugar, esPareja) {
+  const medalla = lugar === 1 ? '🥇' : lugar === 2 ? '🥈' : lugar === 3 ? '🥉' : null;
+  const nombre = esPareja && r.pareja_nombre ? `${r.full_name} + ${r.pareja_nombre}` : r.full_name;
+  return el('div', { class: 'list-row' }, [
+    el('span', { class: 'rank' }, medalla || String(lugar)),
+    el('span', { class: 'avatar' }, avatarContent(r)),
+    el('div', { style: 'min-width:0;' }, [
+      el('div', { class: 'name' }, nombre),
+      el('div', { class: 'meta' }, [
+        `${r.partidos_ganados}/${r.partidos_jugados} partidos · games ${r.games_favor}-${r.games_contra}`,
+        r.cancha_actual ? ` · cancha ${r.cancha_actual}` : '',
+        r.es_sustituto ? ' · sustituto' : '',
+      ].join('')),
+      r.cashback_mxn
+        ? el('div', { class: 'meta', style: 'color:var(--success);font-weight:700;' },
+            `Cashback $${Number(r.cashback_mxn)} MXN${esPareja ? ' c/u' : ''}`)
+        : null,
+    ]),
+    el('span', { class: 'value' }, [
+      el('div', {}, formatPuntos(r.puntos)),
+      el('div', { class: 'text-tiny', style: 'font-weight:600;color:var(--text-tertiary);' }, 'pts'),
+    ]),
+  ]);
 }

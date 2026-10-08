@@ -148,7 +148,7 @@ function dibujarPie(ctx) {
 /* ============================================================
    1) Resultados de la noche — podio compartido (no personalizado).
    ============================================================ */
-export async function generarTarjetaNoche({ sessionDateLabel, formatoLabel, categoryLabel, filas }) {
+export async function generarTarjetaNoche({ sessionDateLabel, formatoLabel, categoryLabel, filas, unidad = 'jugadores' }) {
   const { canvas, ctx } = crearLienzo();
   await fondoYEncabezado(ctx, {
     titulo: 'Resultados de la noche',
@@ -163,7 +163,7 @@ export async function generarTarjetaNoche({ sessionDateLabel, formatoLabel, cate
   ctx.textAlign = 'center';
   ctx.fillStyle = COLOR.textTertiary;
   ctx.font = '500 28px ' + FUENTE;
-  ctx.fillText('Puntos de la noche · ' + lista.length + ' jugadores', ANCHO / 2, 585);
+  ctx.fillText('Puntos de la noche · ' + lista.length + ' ' + unidad, ANCHO / 2, 585);
 
   let y = 630;
   const cardX = 80;
@@ -189,14 +189,30 @@ export async function generarTarjetaNoche({ sessionDateLabel, formatoLabel, cate
 
     ctx.textAlign = 'left';
     ctx.fillStyle = COLOR.textPrimary;
-    ctx.font = '800 ' + Math.round(Math.min(38, alturaFila * 0.42)) + 'px ' + FUENTE;
     const anchoNombre = cardW - (gano ? 520 : 330);
-    ctx.fillText(acortar(ctx, f.full_name, anchoNombre), cardX + 140, cy + (alturaFila > 90 ? 0 : 12));
+    // En Parejas Fijas el renglon trae DOS nombres ("A + B"): en una sola
+    // linea se cortaba en "Fernando Aguilar + ...". Se parte en dos.
+    const partes = String(f.full_name || '').split(' + ');
+    const dosLineas = partes.length === 2 && alturaFila > 100;
 
-    if (alturaFila > 90) {
-      ctx.fillStyle = COLOR.textTertiary;
-      ctx.font = '500 26px ' + FUENTE;
-      ctx.fillText(f.partidos_ganados + '/' + f.partidos_jugados + ' partidos', cardX + 140, cy + 36);
+    if (dosLineas) {
+      const fs = Math.round(Math.min(32, alturaFila * 0.26));
+      ctx.font = '800 ' + fs + 'px ' + FUENTE;
+      ctx.fillText(acortar(ctx, partes[0], anchoNombre), cardX + 140, cy - (alturaFila > 125 ? 26 : 12));
+      ctx.fillText(acortar(ctx, '+ ' + partes[1], anchoNombre), cardX + 140, cy + (alturaFila > 125 ? 12 : 26));
+      if (alturaFila > 125) {
+        ctx.fillStyle = COLOR.textTertiary;
+        ctx.font = '500 24px ' + FUENTE;
+        ctx.fillText(f.partidos_ganados + '/' + f.partidos_jugados + ' partidos', cardX + 140, cy + 48);
+      }
+    } else {
+      ctx.font = '800 ' + Math.round(Math.min(38, alturaFila * 0.42)) + 'px ' + FUENTE;
+      ctx.fillText(acortar(ctx, f.full_name, anchoNombre), cardX + 140, cy + (alturaFila > 90 ? 0 : 12));
+      if (alturaFila > 90) {
+        ctx.fillStyle = COLOR.textTertiary;
+        ctx.font = '500 26px ' + FUENTE;
+        ctx.fillText(f.partidos_ganados + '/' + f.partidos_jugados + ' partidos', cardX + 140, cy + 36);
+      }
     }
 
     if (gano) {

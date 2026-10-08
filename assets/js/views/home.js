@@ -7,6 +7,7 @@ import {
   getMiRondaActual, horaServidor,
   getNotificacionesUrgentes, marcarNotificacionLeida,
   getLiguillaEventosAdmin, getCalificadosLiguillaAdmin, getParejasLiguilla, getLiguillaEventStartTs,
+  getAlertasRecepcion,
 } from '../api.js';
 import { navigate } from '../router.js';
 import { abrirNoche } from './admin_escaleras.js';
@@ -264,6 +265,14 @@ async function renderInicioAdmin(profile) {
   const conteos = await getConteosRegistros(
     [...deHoy, ...pendientes, ...proximas].map((e) => e.id)).catch(() => ({}));
 
+  /* ---------- lo que hay que atender (bajas de ultima hora, multas) ---------- */
+  // Se pide despues de las noches para no retrasar lo de hoy, pero se pinta
+  // ARRIBA: una baja a dos horas de la noche se arregla por WhatsApp o no se
+  // arregla. El hueco se reserva aqui y se llena cuando llega la respuesta.
+  const huecoAlertas = el('div');
+  const huecoPendientes = el('div');
+  wrap.appendChild(huecoAlertas);
+
   /* ---------- lo de hoy ---------- */
   wrap.appendChild(el('div', { class: 'section-title', style: 'margin-top:0;' }, 'Hoy'));
   if (!deHoy.length) {
@@ -310,6 +319,14 @@ async function renderInicioAdmin(profile) {
       'Si una noche no llega a su cupo, no hay escalera: se cancela. Puedes agregar gente tú mismo desde la noche.'));
   }
 
+  // Lo que no es urgente (multas, suspendidos) va aquí abajo: no tiene que
+  // competir con la noche de hoy por el primer vistazo.
+  wrap.appendChild(huecoPendientes);
+  pintarAlertasRecepcion(huecoAlertas, huecoPendientes).catch((err) => {
+    console.error('No se pudieron cargar las alertas de recepción:', err);
+    huecoAlertas.innerHTML = ''; huecoPendientes.innerHTML = '';
+  });
+
   /* ---------- Liguilla del mes: la app la lleva sola, recepción la monitorea ---------- */
   try {
     const bloque = await renderMonitorLiguilla();
@@ -340,6 +357,123 @@ async function renderInicioAdmin(profile) {
   wrap.appendChild(accesos);
 
   return wrap;
+}
+
+/* ============================================================
+   Alertas de recepción
+   ------------------------------------------------------------
+   Lo que pidió dirección después de la primera semana real: que
+   el Inicio del admin AVISE cuando alguien se da de baja a
+   última hora (para alcanzar a jalar gente por WhatsApp) y que
+   deje ver de un golpe quién trae multa sin pagar y quién está
+   suspendido o archivado. Lo urgente arriba, con el botón de
+   WhatsApp en el mismo renglón.
+   ============================================================ */
+function waLinkRecepcion(nombre, telefono, mensaje) {
+  const digitos = (telefono || '').replace(/\D/g, '');
+  const texto = mensaje || `Hola${nombre ? ' ' + String(nombre).split(' ')[0] : ''}, te escribimos de Padel Palmira 🎾`;
+  if (digitos.length !== 10) return null;
+  return `https://wa.me/52${digitos}?text=${encodeURIComponent(texto)}`;
+}
+
+async function pintarAlertasRecepcion(box, boxResto) {
+  const a = await getAlertasRecepcion();
+  const bajas = a.bajas || [];
+  const multas = a.multas || [];
+  const suspendidos = a.suspendidos || [];
+  box.innerHTML = '';
+  if (boxResto) boxResto.innerHTML = '';
+  if (!bajas.length && !multas.length && !suspendidos.length) return;
+  const resto = boxResto || box;
+
+  /* ---- bajas de última hora: lo que se arregla HOY ---- */
+  if (bajas.length) {
+    box.appendChild(el('div', { class: 'section-title', style: 'margin-top:0;color:var(--warning);' },
+      bajas.length === 1 ? 'Se dio de baja 1 jugador' : `Se dieron de baja ${bajas.length} jugadores`));
+    const card = el('div', { class: 'card', style: 'border-color:var(--warning);' });
+    bajas.forEach((b, i) => {
+      if (i > 0) card.appendChild(el('hr', { class: 'sep', style: 'margin:12px 0;' }));
+      const faltan = Math.max((b.capacidad || 12) - (b.ocupados || 0), 0);
+      const link = waLinkRecepcion(b.nombre, b.telefono,
+        `Hola, te escribimos de Padel Palmira 🎾 Nos quedó un lugar libre para la escalera del ${formatFecha(b.session_date)}. ¿Te animas?`);
+      card.appendChild(el('div', { class: 'row-between' }, [
+        el('div', { style: 'min-width:0;' }, [
+          el('div', { style: 'font-weight:700;font-size:14.5px;' }, b.nombre || '(sin nombre)'),
+          el('div', { class: 'text-tiny mt-1' },
+            `${formatFecha(b.session_date)} · ${FORMATO[b.formato] || b.formato}`
+            + (b.categoria ? ' · Cat ' + b.categoria : '')
+            + ` · se dio de baja ${formatFechaHora(b.cancelled_at)}`),
+          el('div', { class: 'text-tiny mt-1', style: faltan > 0 ? 'color:var(--warning);font-weight:700;' : 'color:var(--success);font-weight:700;' },
+            faltan > 0
+              ? (b.cubierto ? `Entró alguien de lista de espera, pero aún faltan ${faltan}` : `Falta${faltan === 1 ? '' : 'n'} ${faltan} para el cupo`)
+              : 'El cupo sigue completo'),
+        ]),
+        el('span', { class: `badge ${b.tardia ? 'badge-danger' : 'badge-neutral'}` },
+          b.tardia ? 'Baja tardía' : 'A tiempo'),
+      ]));
+      const fila = el('div', { class: 'btn-row mt-2' });
+      fila.appendChild(el('button', { class: 'btn btn-secondary btn-sm',
+        onclick: () => irANoche(b.escalera_id) }, 'Abrir esa noche'));
+      if (link) {
+        fila.appendChild(el('a', { class: 'btn btn-secondary btn-sm', href: link, target: '_blank', rel: 'noopener',
+          style: 'display:flex;align-items:center;justify-content:center;gap:6px;' },
+          [el('span', { html: icon.whatsapp, style: 'width:16px;height:16px;' }), 'WhatsApp']));
+      }
+      card.appendChild(fila);
+    });
+    box.appendChild(card);
+    box.appendChild(el('p', { class: 'text-tiny mt-2 mb-3' },
+      'Las bajas hechas en los primeros 15 minutos después de anotarse no salen aquí: no cuentan como baja.'));
+  }
+
+  /* ---- multas y suspendidos: no es urgente, pero tiene que estar a la vista ---- */
+  if (multas.length || suspendidos.length) {
+    const resumen = [];
+    if (multas.length) resumen.push(`${multas.length} multa${multas.length === 1 ? '' : 's'} sin pagar`);
+    if (suspendidos.length) {
+      resumen.push(suspendidos.length === 1
+        ? '1 jugador suspendido o archivado'
+        : `${suspendidos.length} jugadores suspendidos o archivados`);
+    }
+    resto.appendChild(el('div', { class: 'section-title' }, 'Pendientes con jugadores'));
+    const card = el('div', { class: 'card' });
+    card.appendChild(el('p', { class: 'text-muted' }, resumen.join(' · ')));
+
+    multas.forEach((m) => {
+      const link = waLinkRecepcion(m.nombre, m.telefono,
+        `Hola${m.nombre ? ' ' + String(m.nombre).split(' ')[0] : ''}, te escribimos de Padel Palmira 🎾 Tienes una multa pendiente de $${Number(m.monto)} MXN. La puedes pagar en recepción.`);
+      card.appendChild(el('hr', { class: 'sep', style: 'margin:12px 0;' }));
+      card.appendChild(el('div', { class: 'row-between' }, [
+        el('div', { style: 'min-width:0;' }, [
+          el('div', { style: 'font-weight:700;font-size:14.5px;' }, m.nombre || '(sin nombre)'),
+          el('div', { class: 'text-tiny mt-1' },
+            `$${Number(m.monto)} MXN · ${m.motivo || 'multa'} · ${formatFechaHora(m.applied_at)}`),
+        ]),
+        link
+          ? el('a', { class: 'btn btn-secondary btn-sm', href: link, target: '_blank', rel: 'noopener', style: 'width:auto;' }, 'Cobrar')
+          : el('span', { class: 'badge badge-warning' }, 'Sin pagar'),
+      ]));
+    });
+
+    suspendidos.forEach((p) => {
+      card.appendChild(el('hr', { class: 'sep', style: 'margin:12px 0;' }));
+      card.appendChild(el('div', { class: 'row-between' }, [
+        el('div', { style: 'min-width:0;' }, [
+          el('div', { style: 'font-weight:700;font-size:14.5px;' }, p.nombre || '(sin nombre)'),
+          el('div', { class: 'text-tiny mt-1' },
+            p.estado === 'suspended'
+              ? (p.hasta ? `Suspendido hasta ${formatFecha(String(p.hasta).slice(0, 10))}` : 'Suspendido')
+              : 'Archivado — no puede anotarse'),
+        ]),
+        el('span', { class: `badge ${p.estado === 'suspended' ? 'badge-danger' : 'badge-neutral'}` },
+          p.estado === 'suspended' ? 'Suspendido' : 'Archivado'),
+      ]));
+    });
+
+    card.appendChild(el('button', { class: 'btn btn-ghost btn-sm mt-2',
+      onclick: () => navigate('/admin/jugadores') }, 'Ver todos los jugadores'));
+    resto.appendChild(card);
+  }
 }
 
 function irANoche(id) { abrirNoche(id); navigate('/admin/escaleras'); }

@@ -712,14 +712,27 @@ export async function getEscalerasAdmin() {
   const desdeDate = new Date(todayISO() + 'T00:00:00Z');
   desdeDate.setUTCDate(desdeDate.getUTCDate() - 14);
   const desde = desdeDate.toISOString().slice(0, 10);
+  // Las canceladas SI vienen: antes se filtraban y la noche simplemente
+  // desaparecia de Administracion, sin rastro de quien la cancelo ni cuando
+  // (reportado tras la primera semana real). Ahora salen marcadas.
   const { data, error } = await supabase
     .from('escaleras')
     .select('*, weekday_schedule(*)')
     .gte('session_date', desde)
-    .not('status', 'in', '("cancelled")')
     .order('session_date', { ascending: false });
   if (error) throw error;
-  return (data || []).filter((e) => !e.is_liguilla);
+  const lista = (data || []).filter((e) => !e.is_liguilla);
+
+  // cancelled_by no tiene llave foranea (se agrego sin tocar la tabla viva),
+  // asi que el nombre de quien cancelo se resuelve en una segunda consulta.
+  const ids = [...new Set(lista.map((e) => e.cancelled_by).filter(Boolean))];
+  if (ids.length) {
+    const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+    const porId = {};
+    (profs || []).forEach((p) => { porId[p.id] = p.full_name; });
+    lista.forEach((e) => { if (e.cancelled_by) e.cancelado_por = porId[e.cancelled_by] || null; });
+  }
+  return lista;
 }
 
 /* Cuantos van y cuantos esperan en varias noches de un jalon: lo usa el
@@ -1301,4 +1314,61 @@ export async function crearJugadorAdmin({ email, fullName, phone, declaredLevel 
   }
   if (data && data.error) throw new Error(data.error);
   return data;
+}
+
+/* =====================================================================
+   Deployment 2.2
+   ===================================================================== */
+
+/* Noches que ya pasaron (por defecto desde el lunes de la semana pasada).
+   Cualquier jugador las puede ver, haya jugado o no: para eso son. */
+export async function getConvocatoriasPasadas(desde = null) {
+  const { data, error } = await supabase.rpc('convocatorias_pasadas', { p_desde: desde });
+  if (error) throw error;
+  return data || [];
+}
+
+/* Datos de UNA noche cualquiera, pasada o futura. Lo usa la página de la
+   noche cuando ya no sale en las convocatorias de la semana. */
+export async function getConvocatoriaInfo(escaleraId) {
+  const { data, error } = await supabase.rpc('convocatoria_info', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return (data && data[0]) || null;
+}
+
+/* Con quién juega cada quien esa noche — para pintar la pareja completa en
+   la tabla de resultados de Parejas Fijas. */
+export async function getParejasDeNoche(escaleraId) {
+  const { data, error } = await supabase.rpc('parejas_de_noche', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return data || [];
+}
+
+/* Cada cashback redimido del mes: quién, cuánto, de qué noche salió, cuándo
+   se redimió y quién lo escaneó. */
+export async function getReporteCashbacksRedimidos(monthKey = null) {
+  const { data, error } = await supabase.rpc('reporte_cashbacks_redimidos', { p_month_key: monthKey });
+  if (error) throw error;
+  return data || [];
+}
+
+/* Lo que recepción tiene que traer en la cabeza: bajas de última hora,
+   multas sin pagar y jugadores suspendidos. */
+export async function getAlertasRecepcion() {
+  const { data, error } = await supabase.rpc('alertas_recepcion');
+  if (error) throw error;
+  return data || { bajas: [], multas: [], suspendidos: [] };
+}
+
+/* "No llegó": mete al reemplazo en la cancha del ausente y le marca el
+   no-show con su penalización, en un solo paso. */
+export async function noLlegoReemplazar(escaleraId, salePlayerId, entraPlayerId, marcarNoShow = true) {
+  const { data, error } = await supabase.rpc('no_llego_reemplazar', {
+    p_escalera_id: escaleraId,
+    p_sale_player_id: salePlayerId,
+    p_entra_player_id: entraPlayerId,
+    p_marcar_no_show: marcarNoShow,
+  });
+  if (error) throw error;
+  return data || {};
 }
