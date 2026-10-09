@@ -300,9 +300,9 @@ async function renderInicioAdmin(profile) {
     wrap.appendChild(el('div', { class: 'section-title' }, 'Cómo van las que vienen'));
     const card = el('div', { class: 'card' });
     proximas.forEach((e, i) => {
-      const c = conteos[e.id] || { confirmados: 0, espera: 0 };
+      const c = conteos[e.id] || { confirmados: 0, espera: 0, porConfirmar: 0 };
       const cupo = (e.weekday_schedule && e.weekday_schedule.capacity) || 12;
-      const completo = c.confirmados >= cupo;
+      const completo = c.confirmados >= cupo && !(c.porConfirmar > 0);
       if (i > 0) card.appendChild(el('hr', { class: 'sep', style: 'margin:12px 0;' }));
       card.appendChild(el('div', { class: 'row-between fila-enlace', onclick: () => irANoche(e.id) }, [
         el('div', {}, [
@@ -311,7 +311,8 @@ async function renderInicioAdmin(profile) {
             `${FORMATO[e.weekday_schedule.format]}${e.weekday_schedule.category ? ' · Cat ' + e.weekday_schedule.category : ''}`),
         ]),
         el('span', { class: `badge ${completo ? 'badge-success' : 'badge-warning'}` },
-          completo ? `${c.confirmados}/${cupo} lleno` : `${c.confirmados}/${cupo}`),
+          completo ? `${c.confirmados}/${cupo} lleno`
+            : (c.porConfirmar ? `${c.confirmados - c.porConfirmar}+${c.porConfirmar}?/${cupo}` : `${c.confirmados}/${cupo}`)),
       ]));
     });
     wrap.appendChild(card);
@@ -378,18 +379,56 @@ function waLinkRecepcion(nombre, telefono, mensaje) {
 
 async function pintarAlertasRecepcion(box, boxResto) {
   const a = await getAlertasRecepcion();
+  const incompletas = a.incompletas || [];
   const bajas = a.bajas || [];
   const multas = a.multas || [];
   const suspendidos = a.suspendidos || [];
   box.innerHTML = '';
   if (boxResto) boxResto.innerHTML = '';
-  if (!bajas.length && !multas.length && !suspendidos.length) return;
+  if (!incompletas.length && !bajas.length && !multas.length && !suspendidos.length) return;
   const resto = boxResto || box;
 
-  /* ---- bajas de última hora: lo que se arregla HOY ---- */
+  /* ---- LO PRIMERO: noches de hoy y mañana que NO están completas ----
+     Esta es la alerta que faltaba el 8 de octubre. No depende de haber
+     cachado el momento en que se liberó el lugar ni de POR QUÉ se liberó:
+     si falta gente, sale aquí, y punto. */
+  incompletas.forEach((e) => {
+    const esParejas = e.formato === 'parejas';
+    const faltan = esParejas ? Math.ceil(e.faltan / 2) : e.faltan;
+    const van = esParejas ? Math.floor(e.ocupados / 2) : e.ocupados;
+    const total = esParejas ? Math.floor(e.capacidad / 2) : e.capacidad;
+    const unidad = esParejas ? (faltan === 1 ? 'pareja' : 'parejas') : (faltan === 1 ? 'jugador' : 'jugadores');
+    const horas = Number(e.horas_para_empezar);
+    const urge = horas <= 6;
+    const card = el('div', { class: 'card mb-3', style: `border:1.5px solid var(--${urge ? 'danger' : 'warning'});` }, [
+      el('div', { class: 'row-between' }, [
+        el('div', { style: 'min-width:0;' }, [
+          el('div', { style: `font-weight:800;font-size:16px;color:var(--${urge ? 'danger' : 'warning'});` },
+            `Falta${faltan === 1 ? '' : 'n'} ${faltan} ${unidad}`),
+          el('div', { style: 'font-weight:700;font-size:14.5px;margin-top:4px;' }, formatFecha(e.session_date)),
+          el('div', { class: 'text-tiny mt-1' },
+            `${FORMATO[e.formato] || e.formato}${e.categoria ? ' · Cat ' + e.categoria : ''}`
+            + ` · ${formatHora(e.start_time)} · van ${van} de ${total}`),
+          horas <= 24
+            ? el('div', { class: 'text-tiny mt-1', style: `color:var(--${urge ? 'danger' : 'warning'});font-weight:700;` },
+                horas < 1 ? 'Empieza en menos de 1 hora' : `Empieza en ${horas} h`)
+            : null,
+          e.pendientes_de_aceptar > 0
+            ? el('div', { class: 'text-tiny mt-1', style: 'color:var(--warning);' },
+                `Ojo: ${e.pendientes_de_aceptar} ${e.pendientes_de_aceptar === 1 ? 'pareja apartada sigue' : 'parejas apartadas siguen'} esperando que el invitado acepte — puede caerse.`)
+            : null,
+        ]),
+      ]),
+      el('button', { class: 'btn btn-primary btn-sm mt-3', onclick: () => irANoche(e.escalera_id) },
+        'Abrir y completar la noche'),
+    ]);
+    box.appendChild(card);
+  });
+
+  /* ---- lugares que se liberaron, por la vía que sea ---- */
   if (bajas.length) {
     box.appendChild(el('div', { class: 'section-title', style: 'margin-top:0;color:var(--warning);' },
-      bajas.length === 1 ? 'Se dio de baja 1 jugador' : `Se dieron de baja ${bajas.length} jugadores`));
+      bajas.length === 1 ? 'Se liberó 1 lugar' : `Se liberaron ${bajas.length} lugares`));
     const card = el('div', { class: 'card', style: 'border-color:var(--warning);' });
     bajas.forEach((b, i) => {
       if (i > 0) card.appendChild(el('hr', { class: 'sep', style: 'margin:12px 0;' }));
@@ -401,15 +440,16 @@ async function pintarAlertasRecepcion(box, boxResto) {
           el('div', { style: 'font-weight:700;font-size:14.5px;' }, b.nombre || '(sin nombre)'),
           el('div', { class: 'text-tiny mt-1' },
             `${formatFecha(b.session_date)} · ${FORMATO[b.formato] || b.formato}`
-            + (b.categoria ? ' · Cat ' + b.categoria : '')
-            + ` · se dio de baja ${formatFechaHora(b.cancelled_at)}`),
+            + (b.categoria ? ' · Cat ' + b.categoria : '')),
+          el('div', { class: 'text-tiny mt-1' },
+            `${b.motivo || 'Se liberó el lugar'} · ${formatFechaHora(b.cancelled_at)}`),
           el('div', { class: 'text-tiny mt-1', style: faltan > 0 ? 'color:var(--warning);font-weight:700;' : 'color:var(--success);font-weight:700;' },
             faltan > 0
               ? (b.cubierto ? `Entró alguien de lista de espera, pero aún faltan ${faltan}` : `Falta${faltan === 1 ? '' : 'n'} ${faltan} para el cupo`)
               : 'El cupo sigue completo'),
         ]),
         el('span', { class: `badge ${b.tardia ? 'badge-danger' : 'badge-neutral'}` },
-          b.tardia ? 'Baja tardía' : 'A tiempo'),
+          b.tardia ? 'Baja tardía' : (b.por_el_mismo ? 'A tiempo' : 'Sin penalización')),
       ]));
       const fila = el('div', { class: 'btn-row mt-2' });
       fila.appendChild(el('button', { class: 'btn btn-secondary btn-sm',
@@ -481,14 +521,22 @@ function irANoche(id) { abrirNoche(id); navigate('/admin/escaleras'); }
 /* Una noche, con el botón que toca según en qué momento va. */
 function tarjetaAdmin(e, conteo, esHoy) {
   const ws = e.weekday_schedule || {};
-  const c = conteo || { confirmados: 0, espera: 0 };
+  const c = conteo || { confirmados: 0, espera: 0, porConfirmar: 0 };
   const cupo = ws.capacity || 12;
   const completo = c.confirmados >= cupo;
+  // Un lugar apartado por una pareja que no ha aceptado NO es un lugar
+  // seguro: el cupo se ve lleno y se puede caer solo (8 oct 2026).
+  const enElAire = c.porConfirmar || 0;
+  const esParejas = ws.format === 'parejas';
+  const firmes = c.confirmados - enElAire;
 
   let etiqueta; let clase; let nota;
   if (e.status === 'in_progress') {
     etiqueta = 'Seguir capturando'; clase = 'btn-primary';
     nota = 'La noche ya arrancó. Captura los marcadores y genera cada ronda.';
+  } else if (e.status === 'scheduled' && completo && enElAire > 0) {
+    etiqueta = 'Ver quién va'; clase = 'btn-secondary';
+    nota = `OJO: el cupo se ve lleno pero ${esParejas ? (enElAire / 2 === 1 ? '1 pareja sigue esperando' : (enElAire / 2) + ' parejas siguen esperando') : enElAire + ' todavía esperan'} que el invitado acepte. Si no aceptan, esos lugares se liberan solos.`;
   } else if (e.status === 'scheduled' && completo) {
     etiqueta = 'Abrir y comenzar'; clase = 'btn-primary';
     nota = 'Ya está el cupo completo. Cuando estén en cancha, ábrela y dale Comenzar.';
@@ -506,9 +554,10 @@ function tarjetaAdmin(e, conteo, esHoy) {
         el('p', { class: 'text-muted mt-1' },
           `${FORMATO[ws.format] || ws.format}${ws.category ? ' · Cat ' + ws.category : ''} · ${formatHora(ws.start_time)}`),
       ]),
-      el('span', { class: `badge ${completo ? 'badge-success' : 'badge-warning'}` }, `${c.confirmados}/${cupo}`),
+      el('span', { class: `badge ${completo && !enElAire ? 'badge-success' : 'badge-warning'}` },
+        enElAire ? `${firmes}+${enElAire}?/${cupo}` : `${c.confirmados}/${cupo}`),
     ]),
-    nota ? el('p', { class: 'text-tiny mt-3' }, nota) : null,
+    nota ? el('p', { class: 'text-tiny mt-3', style: enElAire ? 'color:var(--warning);font-weight:700;' : '' }, nota) : null,
     c.espera > 0 ? el('p', { class: 'text-tiny mt-1' }, `${c.espera} en lista de espera`) : null,
     el('button', { class: `btn ${clase} mt-4`, onclick: () => irANoche(e.id) }, etiqueta),
   ]);

@@ -7,6 +7,7 @@ import {
   marcarNoShow, cancelarRegistro, asignarSustituto, asignarSustitutoAdmin, deshacerSustituto, buscarJugadores,
   cancelarEscaleraAdmin,
   comenzarEscalera, adminAgregarJugador, getAjusteNum, getTablaNoche, cambiarFormatoNoche,
+  getConteosRegistros,
   iniciarCronometroRonda, horaServidor,
   responderInvitacionPareja, reemplazarJugadorEnCancha,
   podioDeNoche, noLlegoReemplazar, getParejasDeNoche,
@@ -184,10 +185,15 @@ async function pintarLista(wrap) {
   const canceladas = escaleras.filter((e) => e.status === 'cancelled')
     .sort((a, b) => b.session_date.localeCompare(a.session_date));
 
+  // Los conteos de las noches que todavía no se juegan: es lo que permite
+  // marcar en la lista cuáles traen lugares apartados sin confirmar.
+  const porJugar = [...deHoy, ...pendientes, ...proximas].filter((e) => e.status === 'scheduled');
+  const conteos = await getConteosRegistros(porJugar.map((e) => e.id)).catch(() => ({}));
+
   const seccion = (titulo, lista, destacar) => {
     if (!lista.length) return;
     wrap.appendChild(el('div', { class: 'section-title' }, titulo));
-    lista.forEach((esc) => wrap.appendChild(tarjetaNoche(wrap, esc, destacar)));
+    lista.forEach((esc) => wrap.appendChild(tarjetaNoche(wrap, esc, destacar, conteos[esc.id])));
   };
 
   seccion('Hoy', deHoy.filter((e) => e.status !== 'cancelled'), true);
@@ -206,9 +212,15 @@ function textoCancelacion(esc) {
   return `Cancelada por ${quien}${cuando ? ' · ' + cuando : ''}`;
 }
 
-function tarjetaNoche(wrap, esc, destacar) {
+function tarjetaNoche(wrap, esc, destacar, conteo) {
   const ws = esc.weekday_schedule;
   const est = ESTADO_ESCALERA[esc.status] || { text: esc.status, cls: 'badge-neutral' };
+  const cupo = (ws && ws.capacity) || 12;
+  const esParejas = ws && ws.format === 'parejas';
+  const uni = (n) => (esParejas ? Math.floor(n / 2) : n);
+  const c = conteo || null;
+  const enElAire = c ? (c.porConfirmar || 0) : 0;
+  const faltan = c ? Math.max(cupo - c.confirmados, 0) : 0;
   return el('div', {
     class: 'card card-tappable mt-3' + (destacar ? ' card-hero' : ''),
     onclick: () => pintarDetalle(wrap, esc.id),
@@ -220,6 +232,13 @@ function tarjetaNoche(wrap, esc, destacar) {
         esc.status === 'cancelled'
           ? el('div', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' }, textoCancelacion(esc))
           : null,
+        c && enElAire > 0
+          ? el('div', { class: 'text-tiny mt-1', style: 'color:var(--warning);font-weight:700;' },
+              `${uni(enElAire)} ${esParejas ? (uni(enElAire) === 1 ? 'pareja apartada sin confirmar' : 'parejas apartadas sin confirmar') : 'sin confirmar'} — se puede caer`)
+          : (c && faltan > 0
+              ? el('div', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' },
+                  `Van ${uni(c.confirmados)} de ${uni(cupo)}${esParejas ? ' parejas' : ''}`)
+              : null),
       ]),
       el('span', { class: `badge ${est.cls}` }, est.text),
     ]),
@@ -289,6 +308,13 @@ async function pintarDetalle(wrap, escaleraId) {
   // avisando que un jugador no venia — pero marcar no-show ya estaba
   // bloqueado. Mientras no se capture ni un marcador, la noche sigue siendo
   // "antes de jugar" para efectos de no-show y sustitutos.
+  // Lugares apartados por una invitación de pareja que nadie ha contestado.
+  const porConfirmar = registros.filter(
+    (r) => r.status === 'confirmed' && r.partner_id
+      && (r.partner_status === 'pending'
+        || registros.some((o) => o.partner_status === 'pending' && o.status === 'confirmed'
+             && (o.player_id === r.partner_id || o.partner_id === r.player_id)))
+  ).length;
   const ventanaNoShow = esc.status === 'in_progress'
     && !rondas.some((rd) => (rd.partidos || []).some((m) => m.status === 'completed'));
 
@@ -296,9 +322,9 @@ async function pintarDetalle(wrap, escaleraId) {
   // importante es la ronda: el cupo se guarda en una linea y la lista se
   // pliega, para que la ronda viva quede lo mas arriba posible.
   if (esc.status === 'scheduled') {
-    wrap.appendChild(renderCuantosVan(esc, confirmados.length, cupo, enEspera.length, yaArranco));
+    wrap.appendChild(renderCuantosVan(esc, confirmados.length, cupo, enEspera.length, yaArranco, porConfirmar));
     wrap.appendChild(renderSinConfirmar(esc, ws, confirmados, refresh));
-    wrap.appendChild(renderComenzar(esc, confirmados.length, cupo, faltan, completo, refresh));
+    wrap.appendChild(renderComenzar(esc, confirmados.length, cupo, faltan, completo, refresh, porConfirmar));
     wrap.appendChild(renderRoster(esc, ws, registros, confirmados, enEspera, cupo, refresh, false, rondas));
     wrap.appendChild(renderCambiarFormatoNoche(esc, confirmados.length + enEspera.length, refresh));
   } else if (esc.status !== 'cancelled') {
@@ -636,23 +662,44 @@ function plegable(titulo, contenido, abiertoInicial = false) {
 /* ============================================================
    Cuántos van — el número que recepción necesita de un vistazo.
    ============================================================ */
-function renderCuantosVan(esc, confirmados, cupo, espera, yaArranco) {
+function renderCuantosVan(esc, confirmados, cupo, espera, yaArranco, porConfirmar = 0) {
   const box = el('div', { class: 'mt-4' });
   const pct = Math.min(100, Math.round((confirmados / cupo) * 100));
-  const completo = confirmados >= cupo;
+  const lleno = confirmados >= cupo;
+  // Un lugar apartado por una pareja que todavía no acepta se puede caer
+  // solo. Decir "Cupo completo" ahí fue justo lo que dejó al club con una
+  // pareja menos la noche del 8 de octubre de 2026.
+  const firmes = Math.max(confirmados - porConfirmar, 0);
+  const completo = lleno && porConfirmar === 0;
+  const esParejas = esc.weekday_schedule && esc.weekday_schedule.format === 'parejas';
+  const uni = (n) => (esParejas ? Math.floor(n / 2) : n);
 
   const card = el('div', { class: 'card' });
   card.appendChild(el('div', { class: 'row-between' }, [
     el('div', { style: 'font-size:30px;font-weight:800;line-height:1;' }, [
-      el('span', { style: completo ? 'color:var(--cyan);' : '' }, String(confirmados)),
-      el('span', { style: 'color:var(--text-tertiary);font-size:20px;' }, ` / ${cupo}`),
+      el('span', { style: completo ? 'color:var(--cyan);' : (porConfirmar ? 'color:var(--warning);' : '') },
+        String(uni(firmes))),
+      porConfirmar
+        ? el('span', { style: 'color:var(--warning);font-size:20px;' }, ` + ${uni(porConfirmar)}?`)
+        : null,
+      el('span', { style: 'color:var(--text-tertiary);font-size:20px;' },
+        ` / ${uni(cupo)}${esParejas ? ' parejas' : ''}`),
     ]),
     el('span', { class: `badge ${completo ? 'badge-success' : 'badge-warning'}` },
-      completo ? 'Cupo completo' : `Faltan ${cupo - confirmados}`),
+      completo ? 'Cupo completo'
+        : (porConfirmar ? 'Sin confirmar' : `Faltan ${uni(cupo - confirmados)}`)),
   ]));
   card.appendChild(el('div', { class: 'cupo-bar mt-3' }, [
     el('div', { class: `cupo-bar-fill${completo ? ' full' : ''}`, style: `width:${pct}%;` }),
   ]));
+  if (porConfirmar) {
+    card.appendChild(el('div', { class: 'aviso aviso-warn mt-3' },
+      esParejas
+        ? `${uni(porConfirmar) === 1 ? 'Una pareja apartó su lugar pero el invitado todavía no acepta' : uni(porConfirmar) + ' parejas apartaron su lugar pero el invitado todavía no acepta'}. `
+          + 'Si no aceptan a tiempo, ese lugar se libera solo y la noche se queda coja. '
+          + 'Abajo, en "Quién va", sale en amarillo quién falta.'
+        : `${porConfirmar} lugar(es) están apartados sin confirmar.`));
+  }
   card.appendChild(el('p', { class: 'text-tiny mt-2' },
     espera > 0 ? `${espera} en lista de espera` : 'Sin lista de espera'));
   box.appendChild(card);
@@ -666,7 +713,7 @@ function renderCuantosVan(esc, confirmados, cupo, espera, yaArranco) {
    se llena, se cancela y recepción ve con la gente qué hacer —
    pero eso ya no lo organiza la app, y no reparte puntos.
    ============================================================ */
-function renderComenzar(esc, confirmados, cupo, faltan, completo, refresh) {
+function renderComenzar(esc, confirmados, cupo, faltan, completo, refresh, porConfirmar = 0) {
   const box = el('div', { class: 'mt-4' });
 
   // Si ya pasó la fecha y nadie le dio "Comenzar" ese día, el backend ya no
@@ -695,10 +742,24 @@ function renderComenzar(esc, confirmados, cupo, faltan, completo, refresh) {
   }
 
   if (completo) {
-    box.appendChild(el('div', { class: 'aviso aviso-ok' }, [
-      el('strong', {}, 'Ya están todos. '),
-      'Cuando los tengas en cancha, dale Comenzar: se cierra la lista y la app reparte la ronda 1.',
-    ]));
+    // "Ya están todos" con una invitación sin contestar es justo la frase
+    // que tranquilizó a recepción la tarde del 8 de octubre de 2026: el cupo
+    // se veía lleno y una de las parejas se cayó sola hora y media después.
+    if (porConfirmar > 0) {
+      const n = (esc.weekday_schedule && esc.weekday_schedule.format === 'parejas')
+        ? Math.floor(porConfirmar / 2) : porConfirmar;
+      box.appendChild(el('div', { class: 'aviso aviso-warn' }, [
+        el('strong', {}, 'El cupo se ve lleno, pero NO lo está todavía. '),
+        `${n === 1 ? 'Una pareja apartó su lugar y el invitado no ha aceptado' : n + ' parejas apartaron su lugar y sus invitados no han aceptado'}. `
+        + 'Mientras no acepten, esos lugares se pueden liberar solos. Si ya los tienes en el club, '
+        + 'márcalos tú con "Sí viene" aquí arriba y la noche queda cerrada de verdad.',
+      ]));
+    } else {
+      box.appendChild(el('div', { class: 'aviso aviso-ok' }, [
+        el('strong', {}, 'Ya están todos. '),
+        'Cuando los tengas en cancha, dale Comenzar: se cierra la lista y la app reparte la ronda 1.',
+      ]));
+    }
     box.appendChild(el('button', { class: 'btn btn-primary mt-3', onclick: async (e) => {
       const ok = await confirmSheet({
         title: '¿Comenzar la escalera?',

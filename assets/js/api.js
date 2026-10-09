@@ -740,18 +740,32 @@ export async function getEscalerasAdmin() {
    sin hacer una consulta por cada una. */
 export async function getConteosRegistros(escaleraIds) {
   if (!escaleraIds || !escaleraIds.length) return {};
+  // partner_status viene también: un lugar ocupado por una pareja que todavía
+  // no acepta NO es un lugar seguro, y el Inicio de recepción lo tiene que
+  // poder decir (8 oct 2026: la noche se vio llena toda la tarde con una
+  // invitación sin contestar, y se cayó sola a la 6:45 pm).
   const { data, error } = await supabase
     .from('escalera_registrations')
-    .select('escalera_id, status')
+    .select('escalera_id, status, partner_id, partner_status')
     .in('escalera_id', escaleraIds);
   if (error) throw error;
   const out = {};
-  escaleraIds.forEach((id) => { out[id] = { confirmados: 0, espera: 0 }; });
+  escaleraIds.forEach((id) => { out[id] = { confirmados: 0, espera: 0, porConfirmar: 0 }; });
+  const parejasPendientes = {};
   (data || []).forEach((r) => {
     const c = out[r.escalera_id];
     if (!c) return;
     if (r.status === 'confirmed' || r.status === 'substitute') c.confirmados += 1;
     else if (r.status === 'waitlist') c.espera += 1;
+    if (r.status === 'confirmed' && r.partner_id && r.partner_status === 'pending') {
+      const k = r.escalera_id;
+      parejasPendientes[k] = (parejasPendientes[k] || 0) + 1;
+    }
+  });
+  // Cada invitación sin contestar deja DOS lugares en el aire: el del que
+  // invitó y el del invitado.
+  Object.entries(parejasPendientes).forEach(([id, n]) => {
+    if (out[id]) out[id].porConfirmar = n * 2;
   });
   return out;
 }
@@ -1357,7 +1371,7 @@ export async function getReporteCashbacksRedimidos(monthKey = null) {
 export async function getAlertasRecepcion() {
   const { data, error } = await supabase.rpc('alertas_recepcion');
   if (error) throw error;
-  return data || { bajas: [], multas: [], suspendidos: [] };
+  return data || { incompletas: [], bajas: [], multas: [], suspendidos: [] };
 }
 
 /* "No llegó": mete al reemplazo en la cancha del ausente y le marca el
@@ -1371,4 +1385,25 @@ export async function noLlegoReemplazar(escaleraId, salePlayerId, entraPlayerId,
   });
   if (error) throw error;
   return data || {};
+}
+
+/* ============================================================
+   Deployment 2.3 — lo que salió de la noche del 8 de octubre
+   ------------------------------------------------------------
+   Una pareja apartó dos lugares con una invitación que nunca se
+   contestó, la noche se vio llena toda la tarde y se cayó sola a
+   la 6:45 pm sin que el club se enterara. Estas dos funciones
+   son para que eso se vea venir.
+   ============================================================ */
+
+/* Cuántos de los lugares "ocupados" son parejas que todavía no aceptan. */
+export async function getParejasPorConfirmar(escaleraIds) {
+  if (!escaleraIds || !escaleraIds.length) return {};
+  const { data, error } = await supabase.rpc('parejas_por_confirmar', { p_escalera_ids: escaleraIds });
+  if (error) throw error;
+  const out = {};
+  (data || []).forEach((r) => {
+    out[r.escalera_id] = { parejas: r.parejas_pendientes, jugadores: r.jugadores_pendientes };
+  });
+  return out;
 }

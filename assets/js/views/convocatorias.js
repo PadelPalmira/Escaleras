@@ -11,7 +11,7 @@ import {
   invitarParejaPorCorreo, cancelarInvitacionPareja, cancelarInvitacionCorreo,
   registrarseRetasAbiertas, salirRetasAbiertas, getInscritosRetas,
   miResultadoNoche, getInscritosEscalera, getTablaNoche,
-  getConvocatoriasPasadas, getConvocatoriaInfo, getParejasDeNoche,
+  getConvocatoriasPasadas, getConvocatoriaInfo, getParejasDeNoche, getParejasPorConfirmar,
 } from '../api.js';
 import { navigate } from '../router.js';
 import { APP_URL } from '../config.js';
@@ -54,6 +54,19 @@ function textoTiempoRestante(expiraEnIso) {
 
 export async function renderConvocatorias() {
   const [profile, filas] = await Promise.all([getMyProfile(), getMisConvocatorias(9)]);
+
+  // Cuáles de los lugares que se ven ocupados son parejas que todavía no
+  // contestan. Sin esto, una noche con una invitación en el aire se ve igual
+  // de llena que una noche de verdad llena.
+  const idsParejas = filas.filter((f) => f.formato === 'parejas').map((f) => f.escalera_id);
+  if (idsParejas.length) {
+    try {
+      const pend = await getParejasPorConfirmar(idsParejas);
+      filas.forEach((f) => {
+        if (pend[f.escalera_id]) f.por_confirmar = pend[f.escalera_id].jugadores;
+      });
+    } catch (err) { console.error('No se pudieron cargar las parejas por confirmar:', err); }
+  }
 
   const wrap = el('div');
   wrap.appendChild(el('div', { class: 'h1 mb-2' }, 'Convocatorias'));
@@ -337,9 +350,15 @@ function renderCupo(f) {
   const total = esParejas ? Math.floor(cap / 2) : cap;
   const van = esParejas ? Math.floor(f.ocupados / 2) : f.ocupados;
   const espera = esParejas ? Math.ceil(f.en_espera / 2) : f.en_espera;
+  // Las parejas que apartaron pero todavía no aceptan se cuentan aparte: ese
+  // lugar se puede caer solo y quien lo quiera tiene derecho a saberlo.
+  const enElAire = esParejas ? Math.floor((f.por_confirmar || 0) / 2) : (f.por_confirmar || 0);
+  const firmes = Math.max(van - enElAire, 0);
   const box = el('div', { class: 'mt-3' });
   box.appendChild(el('div', { class: 'row-between text-tiny' }, [
-    el('span', {}, `${van} de ${total} ${esParejas ? 'parejas' : 'lugares'}`),
+    el('span', {}, enElAire
+      ? `${firmes} de ${total} ${esParejas ? 'parejas' : 'lugares'} · ${enElAire} sin confirmar`
+      : `${van} de ${total} ${esParejas ? 'parejas' : 'lugares'}`),
     el('span', { style: 'color:var(--text-tertiary);' },
       espera > 0
         ? `${espera} en lista de espera`
@@ -347,9 +366,15 @@ function renderCupo(f) {
   ]));
   box.appendChild(
     el('div', { class: 'cupo-bar mt-1' }, [
-      el('div', { class: `cupo-bar-fill${pct >= 100 ? ' full' : ''}`, style: `width:${pct}%;` }),
+      el('div', { class: `cupo-bar-fill${pct >= 100 && !enElAire ? ' full' : ''}`, style: `width:${pct}%;` }),
     ])
   );
+  if (enElAire) {
+    box.appendChild(el('p', { class: 'text-tiny mt-1', style: 'color:var(--warning);' },
+      esParejas
+        ? `${enElAire === 1 ? 'Una pareja apartó' : enElAire + ' parejas apartaron'} su lugar y todavía no contesta${enElAire === 1 ? '' : 'n'}. Si llegas con tu pareja ya confirmada, ustedes pasan primero.`
+        : `${enElAire} lugar(es) apartados sin confirmar.`));
+  }
   return box;
 }
 
@@ -1108,6 +1133,13 @@ export async function renderConvocatoriaDetalle() {
     soloLectura = true;
   }
 
+  if (f && f.formato === 'parejas') {
+    try {
+      const pend = await getParejasPorConfirmar([escaleraId]);
+      if (pend[escaleraId]) f.por_confirmar = pend[escaleraId].jugadores;
+    } catch (err) { console.error('No se pudieron cargar las parejas por confirmar:', err); }
+  }
+
   wrap.appendChild(el('button', {
     class: 'btn btn-ghost btn-sm mb-2', style: 'width:auto;padding-left:0;',
     onclick: () => navigate('/convocatorias'),
@@ -1168,15 +1200,21 @@ export async function renderConvocatoriaDetalle() {
     const cap = f.capacidad || 12;
     const unidadTotal = esParejas ? Math.floor(cap / 2) : cap;
     const unidadVan = esParejas ? Math.floor(f.ocupados / 2) : f.ocupados;
+    const enElAire = esParejas ? Math.floor((f.por_confirmar || 0) / 2) : (f.por_confirmar || 0);
     const faltan = Math.max(unidadTotal - unidadVan, 0);
     const pct = Math.min(100, Math.round((unidadVan / unidadTotal) * 100));
     const box = el('div', { class: 'card mt-3' });
     box.appendChild(el('div', { class: 'row-between' }, [
       el('div', { style: 'font-weight:800;font-size:15px;' },
         `${unidadVan} de ${unidadTotal} ${esParejas ? 'parejas' : 'lugares'}`),
-      el('span', { class: `badge ${faltan === 0 ? 'badge-success' : 'badge-warning'}` },
-        faltan === 0 ? 'Cupo lleno' : `Faltan ${faltan}`),
+      el('span', { class: `badge ${faltan === 0 && !enElAire ? 'badge-success' : 'badge-warning'}` },
+        enElAire ? `${enElAire} sin confirmar` : (faltan === 0 ? 'Cupo lleno' : `Faltan ${faltan}`)),
     ]));
+    if (enElAire) {
+      box.appendChild(el('div', { class: 'aviso aviso-warn mt-2' },
+        `${enElAire === 1 ? 'Una pareja apartó su lugar y todavía no acepta la invitación' : enElAire + ' parejas apartaron su lugar y todavía no aceptan la invitación'}. `
+        + 'Si tú llegas con tu pareja ya confirmada, ustedes pasan antes que ellos.'));
+    }
     box.appendChild(el('div', { class: 'cupo-bar mt-2' }, [
       el('div', { class: `cupo-bar-fill${faltan === 0 ? ' full' : ''}`, style: `width:${pct}%;` }),
     ]));
