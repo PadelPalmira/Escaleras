@@ -75,6 +75,18 @@ async function renderInicioJugador(profile) {
     el('div', { class: 'avatar-btn', style: 'width:44px;height:44px;font-size:15px;' }, avatarContent(profile)),
   ]));
 
+  // Entró con la contraseña que le dio recepción: que la cambie por una suya.
+  if (profile && profile.password_provisional) {
+    wrap.appendChild(el('div', { class: 'card mb-3', style: 'border:1.5px solid var(--warning);' }, [
+      el('div', { style: 'font-weight:800;color:var(--warning);' }, 'Cambia tu contraseña'),
+      el('p', { class: 'text-tiny mt-2' },
+        'Estás entrando con la contraseña provisional que te dio recepción. '
+        + 'Ponle una tuya: toma menos de un minuto y nadie más la va a saber.'),
+      el('button', { class: 'btn btn-primary btn-sm mt-3', onclick: () => navigate('/perfil') },
+        'Ponerle mi contraseña'),
+    ]));
+  }
+
   // Tarjeta de la ronda en curso — manda sobre todo lo demás.
   if (miRonda) {
     wrap.appendChild(renderMiRonda(miRonda, desfaseMs));

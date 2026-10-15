@@ -415,9 +415,17 @@ export async function renderPerfil() {
   // Ponerle una es lo que arregla el problema del icono en iPhone: el enlace
   // del correo siempre abre Safari, pero la contraseña se escribe dentro de
   // la app.
-  wrap.appendChild(el('div', { class: 'section-title' }, 'Contraseña'));
+  wrap.appendChild(el('div', { class: 'section-title' },
+    profile.password_provisional ? 'Contraseña — cámbiala' : 'Contraseña'));
   const tienePass = !!profile.password_set_at;
-  const passCard = el('div', { class: 'card' });
+  const passCard = el('div', { class: 'card',
+    style: profile.password_provisional ? 'border:1.5px solid var(--warning);' : '' });
+  if (profile.password_provisional) {
+    passCard.appendChild(el('div', { class: 'aviso aviso-warn mb-2' }, [
+      el('strong', {}, 'Estás usando la contraseña que te dio recepción. '),
+      'Ponle una tuya aquí abajo: nadie más debería saberla.',
+    ]));
+  }
   passCard.appendChild(el('p', { class: 'text-tiny' }, tienePass
     ? 'Ya tienes contraseña: entras directo con tu correo y tu contraseña, sin pasar por el correo.'
     : 'Todavía entras con el enlace que te llega al correo. Si le pones una contraseña, puedes entrar directo desde el icono de la app en tu celular — sobre todo en iPhone, donde el enlace del correo siempre abre Safari.'));
@@ -439,11 +447,17 @@ export async function renderPerfil() {
     passBtn.disabled = true; passBtn.textContent = 'Guardando…';
     try {
       await ponerPassword(pass1.value);
+      // Si venía con una provisional de recepción, ya es suya: se apaga el aviso.
+      try {
+        const api = await import('../api.js');   // dinámico: ver nota en admin_escaleras.js
+        if (typeof api.marcarPasswordPropia === 'function') await api.marcarPasswordPropia();
+      } catch (e) { console.error('No se pudo marcar la contraseña como propia:', e); }
       pass1.value = ''; pass2.value = '';
       passMsg.textContent = 'Listo. La próxima vez entra con tu correo y esta contraseña.';
       passMsg.style.color = 'var(--success)';
       toast('Contraseña guardada.', 'success');
       profile.password_set_at = ahora().toISOString();
+      profile.password_provisional = false;
     } catch (err) {
       passMsg.textContent = humanizeError(err);
       passMsg.style.color = 'var(--danger)';

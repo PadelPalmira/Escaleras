@@ -1407,3 +1407,44 @@ export async function getParejasPorConfirmar(escaleraIds) {
   });
   return out;
 }
+
+/* ============================================================
+   Deployment 2.4
+   ============================================================ */
+
+/* Qué va a pasar ANTES de corregir un marcador: si se rehace la ronda
+   siguiente, si solo se tocan los puntos, o si ya no se puede. */
+export async function getPreviewCorreccion(matchId) {
+  const { data, error } = await supabase.rpc('preview_correccion_partido', { p_match_id: matchId });
+  if (error) throw error;
+  return data || null;
+}
+
+/* Los jugadores que se quedaron con el registro a medias (casi siempre
+   porque nunca les llegó el correo). */
+export async function getJugadoresRegistroIncompleto() {
+  const { data, error } = await supabase.rpc('jugadores_registro_incompleto');
+  if (error) throw error;
+  return data || [];
+}
+
+/* Recepción le pone una contraseña provisional. La genera el servidor y se
+   regresa UNA sola vez para dictársela al jugador. */
+export async function darContrasenaProvisional(playerId, datos = {}) {
+  const { data, error } = await supabase.functions.invoke('contrasena-provisional', {
+    body: { player_id: playerId, ...datos },
+  });
+  if (error) {
+    let msg = error.message || 'No se pudo generar la contraseña.';
+    try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch { /* sin cuerpo */ }
+    throw new Error(msg);
+  }
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+
+/* El jugador puso su propia contraseña: se apaga la marca de provisional. */
+export async function marcarPasswordPropia() {
+  const { error } = await supabase.rpc('marcar_password_propia');
+  if (error) throw error;
+}

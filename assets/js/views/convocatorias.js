@@ -11,13 +11,32 @@ import {
   invitarParejaPorCorreo, cancelarInvitacionPareja, cancelarInvitacionCorreo,
   registrarseRetasAbiertas, salirRetasAbiertas, getInscritosRetas,
   miResultadoNoche, getInscritosEscalera, getTablaNoche,
-  getConvocatoriasPasadas, getConvocatoriaInfo, getParejasDeNoche, getParejasPorConfirmar,
+  getConvocatoriasPasadas, getConvocatoriaInfo, getParejasDeNoche,
 } from '../api.js';
 import { navigate } from '../router.js';
 import { APP_URL } from '../config.js';
 import { generarTarjetaResultadoJugador, compartirTarjeta } from '../vendor/sharecard.js';
 
 const FORMAT_LABEL = { individual: 'Individual', parejas: 'Parejas Fijas', retas_abiertas: 'Retas Abiertas' };
+
+/* Las parejas que apartaron lugar pero no han contestado.
+   ------------------------------------------------------------
+   Se pide con import dinámico A PROPÓSITO: si se subiera este archivo y el
+   navegador de alguien todavía tuviera api.js en caché (pasa durante los
+   primeros minutos de cada deployment), un import estático de una función
+   que aún no existe ahí tumba el módulo COMPLETO y la app no abre. Así, en
+   el peor caso, nomás no sale el aviso. */
+async function parejasPorConfirmarSeguro(ids) {
+  if (!ids || !ids.length) return {};
+  try {
+    const api = await import('../api.js');
+    if (typeof api.getParejasPorConfirmar !== 'function') return {};
+    return await api.getParejasPorConfirmar(ids);
+  } catch (err) {
+    console.error('No se pudieron cargar las parejas por confirmar:', err);
+    return {};
+  }
+}
 
 // Las dos dinámicas son distintas de verdad, no solo de nombre — así que la
 // app lo dice en cada tarjeta en vez de dar por hecho que el jugador ya lo sabe.
@@ -59,14 +78,10 @@ export async function renderConvocatorias() {
   // contestan. Sin esto, una noche con una invitación en el aire se ve igual
   // de llena que una noche de verdad llena.
   const idsParejas = filas.filter((f) => f.formato === 'parejas').map((f) => f.escalera_id);
-  if (idsParejas.length) {
-    try {
-      const pend = await getParejasPorConfirmar(idsParejas);
-      filas.forEach((f) => {
-        if (pend[f.escalera_id]) f.por_confirmar = pend[f.escalera_id].jugadores;
-      });
-    } catch (err) { console.error('No se pudieron cargar las parejas por confirmar:', err); }
-  }
+  const pend = await parejasPorConfirmarSeguro(idsParejas);
+  filas.forEach((f) => {
+    if (pend[f.escalera_id]) f.por_confirmar = pend[f.escalera_id].jugadores;
+  });
 
   const wrap = el('div');
   wrap.appendChild(el('div', { class: 'h1 mb-2' }, 'Convocatorias'));
@@ -658,7 +673,10 @@ function renderInvitacionPendiente(f, refresh) {
       el('strong', {}, (f.mi_partner_nombre || 'Un jugador') + ' te invitó a jugar en pareja. '),
       'Si aceptas, juegan juntos toda la noche.',
     ]),
-    el('p', { class: 'text-tiny', style: 'color:var(--warning);' }, textoTiempoRestante(f.mi_partner_expira_en)),
+    el('p', { class: 'text-tiny', style: 'color:var(--warning);' },
+      'No hay reloj: acepta cuando puedas. Pero mientras no acepten los dos, su lugar no está '
+      + 'asegurado — si se anota una pareja con los dos jugadores ya dentro, ellos pasan primero. '
+      + 'Y tienen que estar los dos antes de que empiece la noche.'),
     el('div', { class: 'btn-row mt-3' }, [
       el('button', {
         class: 'btn btn-secondary btn-sm',
@@ -691,7 +709,11 @@ function renderEsperandoPareja(f, refresh) {
     el('p', {}, esCorreo
       ? `Invitaste a ${f.mi_espera_nombre} por correo. En cuanto se registre con ese mismo correo, se aparta el lugar de los dos.`
       : `Invitaste a ${f.mi_espera_nombre} — todavía no acepta en la app.`),
-    el('p', { class: 'text-tiny', style: 'color:var(--warning);' }, textoTiempoRestante(f.mi_espera_expira_en)),
+    el('p', { class: 'text-tiny', style: 'color:var(--warning);' }, esCorreo
+      ? 'Tiene hasta que empiece la noche para registrarse.'
+      : 'No hay límite de tiempo para que acepte, pero su lugar no está asegurado hasta que lo haga: '
+        + 'una pareja con los dos jugadores ya confirmados pasa antes que ustedes. '
+        + 'Si no acepta antes de que empiece la noche, no juegan.'),
     el('div', { class: 'btn-row mt-3' }, [
       el('button', {
         class: 'btn btn-danger btn-sm',
@@ -910,7 +932,7 @@ async function abrirSelectorPareja(f, profile, aListaEspera, refresh, entraAbier
   const emailInput = el('input', { class: 'input', type: 'email', placeholder: 'Su correo' });
   const btnInvitarCorreo = el('button', { class: 'btn btn-primary btn-sm' }, 'Invitar por correo');
   formCorreo.append(
-    el('p', { class: 'text-tiny' }, 'Le vamos a abrir tu correo con un mensaje ya escrito — tú se lo mandas. En cuanto se registre en la app con ese mismo correo, tiene 1 hora para confirmar.'),
+    el('p', { class: 'text-tiny' }, 'Le vamos a abrir tu correo con un mensaje ya escrito — tú se lo mandas. Tiene hasta que empiece la noche para registrarse en la app con ese mismo correo.'),
     nombreInput, emailInput, btnInvitarCorreo,
   );
   toggleCorreo.addEventListener('click', () => {
@@ -1003,7 +1025,9 @@ async function abrirSelectorSustituto(f, profile, refresh) {
 function renderRetas(f, profile, refresh) {
   const box = el('div');
   const inscrito = f.mi_status === 'confirmed';
+  const enEspera = f.mi_status === 'waitlist';
   const precio = f.precio_mxn != null ? Number(f.precio_mxn) : 150;
+  const cupo = f.capacidad || null;
 
   box.appendChild(el('div', { class: 'retas-precio mt-3' }, [
     el('div', {}, [
@@ -1011,7 +1035,8 @@ function renderRetas(f, profile, refresh) {
       el('div', { class: 'text-tiny' }, 'por persona'),
     ]),
     el('div', { class: 'text-tiny', style: 'text-align:right;max-width:60%;' },
-      `Juegas todo el tiempo que quieras, de ${formatHora(f.start_time)} a ${formatHora(f.end_time)} · Se paga en recepción`),
+      `Juegas todo el tiempo que quieras, de ${formatHora(f.start_time)} a ${formatHora(f.end_time)} · Se paga en recepción`
+      + (cupo ? ` · Hay ${cupo} lugares` : '')),
   ]));
 
   const social = el('div', { class: 'retas-social mt-3' });
@@ -1023,17 +1048,31 @@ function renderRetas(f, profile, refresh) {
   social.append(countLine, namesLine);
   box.appendChild(social);
 
-  const btn = el('button', { class: `btn ${inscrito ? 'btn-secondary' : 'btn-primary'} mt-4` },
-    inscrito ? 'Ya estás anotado — salir' : 'Anotarme');
+  if (enEspera) {
+    box.appendChild(el('div', { class: 'aviso aviso-warn mt-3' }, [
+      el('strong', {}, 'Vas en la lista de espera'
+        + (f.mi_lugar_en_espera ? ` (lugar ${f.mi_lugar_en_espera})` : '') + '. '),
+      'La noche llegó a sus ' + (cupo || 25) + ' lugares. En Retas la gente entra y sale mucho, '
+      + 'así que la fila se mueve: si alguien se sale, entras solo y te avisamos.',
+    ]));
+  }
+
+  const btn = el('button', { class: `btn ${(inscrito || enEspera) ? 'btn-secondary' : 'btn-primary'} mt-4` },
+    inscrito ? 'Ya estás anotado — salir'
+      : enEspera ? 'Salirme de la lista de espera' : 'Anotarme');
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     try {
-      if (inscrito) {
+      if (inscrito || enEspera) {
         await salirRetasAbiertas(f.mi_registro_id);
         toast('Listo, te quitamos de la lista.', 'info');
       } else {
-        await registrarseRetasAbiertas(f.escalera_id);
-        toast('¡Anotado! Nos vemos el viernes.', 'success');
+        const r = await registrarseRetasAbiertas(f.escalera_id);
+        if (r && r.resultado === 'en_espera') {
+          toast(r.aviso || 'Ya se llenó — quedaste en la lista de espera.', 'info', 7000);
+        } else {
+          toast((r && r.aviso) || '¡Anotado! Nos vemos el viernes.', 'success', r && r.aviso ? 6000 : 3200);
+        }
       }
       refresh();
     } catch (err) {
@@ -1043,10 +1082,13 @@ function renderRetas(f, profile, refresh) {
   });
   box.appendChild(btn);
   box.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' },
-    'Anotarte no aparta lugar ni cuesta puntos — solo sirve para que todos vean quién va.'));
+    cupo
+      ? `Anotarte no cuesta puntos ni te compromete a nada. Hay ${cupo} lugares; si ya se llenaron, entras a la lista de espera.`
+      : 'Anotarte no aparta lugar ni cuesta puntos — solo sirve para que todos vean quién va.'));
 
   getInscritosRetas(f.escalera_id).then((inscritos) => {
-    countLine.querySelector('.retas-count-number').textContent = String(inscritos.length);
+    countLine.querySelector('.retas-count-number').textContent =
+      cupo ? `${inscritos.length}/${cupo}` : String(inscritos.length);
     countLine.querySelector('.retas-count-label').textContent =
       inscritos.length === 1 ? 'anotado esta noche' : 'anotados esta noche';
     namesLine.textContent = inscritos.length
@@ -1087,7 +1129,7 @@ const FORMATO_EXPLICADO = {
     puntos: [
       'Se anota uno de los dos y elige a su pareja; al otro le llega la invitación.',
       'Hasta que los DOS estén dentro, la pareja no queda registrada.',
-      'La pareja invitada tiene 2 horas para aceptar: si no, se libera el lugar de los dos.',
+      'La pareja invitada no tiene reloj para aceptar, pero hasta que acepte el lugar no está asegurado: si llega una pareja con los dos jugadores confirmados, esa pasa primero. Los dos tienen que estar dentro antes de que empiece la noche.',
       'Juegan toda la noche juntos y suben o bajan de cancha juntos.',
       'Aquí no hay sustitutos: si uno no puede ir, se cae la pareja completa.',
     ],
@@ -1134,10 +1176,8 @@ export async function renderConvocatoriaDetalle() {
   }
 
   if (f && f.formato === 'parejas') {
-    try {
-      const pend = await getParejasPorConfirmar([escaleraId]);
-      if (pend[escaleraId]) f.por_confirmar = pend[escaleraId].jugadores;
-    } catch (err) { console.error('No se pudieron cargar las parejas por confirmar:', err); }
+    const pend = await parejasPorConfirmarSeguro([escaleraId]);
+    if (pend[escaleraId]) f.por_confirmar = pend[escaleraId].jugadores;
   }
 
   wrap.appendChild(el('button', {
@@ -1386,7 +1426,11 @@ function renderInvitarWhatsapp(f) {
   box.appendChild(el('div', { style: 'font-weight:800;font-size:14.5px;' }, '¿Falta gente? Jálalos'));
   box.appendChild(el('p', { class: 'text-tiny mt-1' },
     f.formato === 'retas_abiertas'
-      ? 'Comparte la noche con quien quieras: en Retas Abiertas no hay cupo.'
+      ? (f.capacidad && f.ocupados >= f.capacidad
+          ? `Ya se llenaron los ${f.capacidad} lugares, pero la fila se mueve: si invitas a alguien, se anota a la lista de espera.`
+          : (f.capacidad
+              ? `Quedan ${Math.max(f.capacidad - f.ocupados, 0)} de ${f.capacidad} lugares. Comparte la noche con quien quieras.`
+              : 'Comparte la noche con quien quieras: en Retas Abiertas no hay cupo.'))
       : (faltan > 0
           ? `Faltan ${faltan} ${esParejas ? (faltan === 1 ? 'pareja' : 'parejas') : (faltan === 1 ? 'lugar' : 'lugares')} para llenar la noche. Mándale el mensaje a quien quieras.`
           : 'La noche ya está llena, pero puedes invitar a alguien a la lista de espera.')));

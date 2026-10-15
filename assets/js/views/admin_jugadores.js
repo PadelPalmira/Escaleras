@@ -57,6 +57,16 @@ export async function renderAdminJugadores() {
   ]));
   wrap.appendChild(el('p', { class: 'text-muted mb-4' }, 'Toca a un jugador para asignar sustituto, aplicar una multa o una suspensión. Con el + das de alta a alguien que todavía no se registra.'));
 
+  // Lo primero que necesita recepción: quién no puede entrar o anotarse.
+  // Son los que hay que destrabar a mano, y antes había que ir descubriéndolos
+  // uno por uno en la lista.
+  const atoradosBox = el('div');
+  wrap.appendChild(atoradosBox);
+  pintarAtorados(atoradosBox, wrap).catch((err) => {
+    console.error('No se pudo cargar quién tiene el registro a medias:', err);
+    atoradosBox.innerHTML = '';
+  });
+
   const search = el('input', { class: 'input mb-2', type: 'search', placeholder: 'Buscar jugador por nombre…', autocomplete: 'off' });
   search.value = ultimoFiltro;
   wrap.appendChild(search);
@@ -150,6 +160,43 @@ export async function renderAdminJugadores() {
   return wrap;
 }
 
+/* Los que no pueden entrar o no pueden anotarse: registro a medias, o una
+   contraseña provisional que todavía no cambian. */
+async function pintarAtorados(box, wrapRaiz) {
+  // Import dinámico: ver la nota en admin_escaleras.js — protege contra el
+  // api.js viejo en caché durante los primeros minutos de un deployment.
+  const api = await import('../api.js');
+  if (typeof api.getJugadoresRegistroIncompleto !== 'function') { box.innerHTML = ''; return; }
+  const lista = await api.getJugadoresRegistroIncompleto();
+  box.innerHTML = '';
+  if (!lista.length) return;
+
+  box.appendChild(el('div', { class: 'section-title', style: 'margin-top:0;color:var(--warning);' },
+    lista.length === 1 ? '1 registro sin terminar' : `${lista.length} registros sin terminar`));
+  const card = el('div', { class: 'card mb-3', style: 'border-color:var(--warning);' });
+  card.appendChild(el('p', { class: 'text-tiny mb-2' },
+    'Mientras no tengan nombre y nivel no se pueden anotar a ninguna noche. '
+    + 'Si además nunca les llegó el correo, entra a su ficha y dale una contraseña provisional.'));
+  lista.forEach((j, i) => {
+    if (i > 0) card.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
+    const faltas = [];
+    if (!((j.full_name || '').trim())) faltas.push('sin nombre');
+    if (!j.declared_level) faltas.push('sin nivel');
+    if (j.password_provisional) faltas.push('contraseña provisional sin cambiar');
+    card.appendChild(el('div', { class: 'row-between fila-enlace', onclick: () => {
+      pintarFicha(wrapRaiz, { ...j, id: j.player_id });
+    } }, [
+      el('div', { style: 'min-width:0;' }, [
+        el('div', { style: 'font-weight:700;font-size:14.5px;' }, j.full_name || '(sin nombre)'),
+        el('div', { class: 'text-tiny mt-1' }, j.email || ''),
+        el('div', { class: 'text-tiny', style: 'color:var(--warning);' }, faltas.join(' · ')),
+      ]),
+      el('span', { html: icon.chevronRight, style: 'width:18px;height:18px;color:var(--text-tertiary);' }),
+    ]));
+  });
+  box.appendChild(card);
+}
+
 async function pintarFicha(wrap, jugador) {
   wrap.innerHTML = '';
   wrap.appendChild(el('div', { class: 'stack', style: 'padding-top:60px;' }, [el('div', { class: 'spinner' })]));
@@ -239,6 +286,86 @@ function abrirAltaJugador(onListo) {
 function nombreNivel(valor) {
   const n = NIVELES.find((x) => x.value === valor);
   return n ? `Nivel ${n.label}` : '';
+}
+
+/* ============================================================
+   Contraseña provisional
+   ------------------------------------------------------------
+   De 89 jugadores, 10 se quedaron atorados sin poder entrar
+   porque el correo del enlace mágico nunca llegó (spam, correo
+   mal escrito, lo que sea). Recepción no podía hacer nada:
+   ponerle contraseña a otra cuenta necesita la llave de
+   servicio. Ahora lo hace el servidor y aquí solo se muestra
+   el resultado — recepción nunca escribe la contraseña.
+   ============================================================ */
+function abrirContrasenaProvisional(jugador, refresh) {
+  const content = el('div', {});
+  content.appendChild(el('div', { class: 'sheet-title' }, 'Contraseña provisional'));
+  content.appendChild(el('p', { class: 'text-tiny mb-3' },
+    `Se le va a generar una contraseña a ${jugador.full_name || 'este jugador'} para que pueda entrar `
+    + `con su correo (${jugador.email}). La app le va a pedir que la cambie por una suya.`));
+
+  const falta = !((jugador.full_name || '').trim()) || !jugador.declared_level;
+  let inNombre = null; let selNivel = null;
+  if (falta) {
+    content.appendChild(el('p', { class: 'text-tiny mb-2', style: 'color:var(--warning);' },
+      'Aprovecha y complétale lo que falta, si no tampoco se va a poder anotar a una noche:'));
+    inNombre = el('input', { class: 'input mb-2', type: 'text', placeholder: 'Nombre completo',
+      value: jugador.full_name || '' });
+    selNivel = el('select', { class: 'input mb-2' }, [
+      el('option', { value: '' }, 'Nivel de juego…'),
+      ...NIVELES.map((n) => el('option', { value: n.value }, n.label)),
+    ]);
+    if (jugador.declared_level) selNivel.value = jugador.declared_level;
+    content.append(inNombre, selNivel);
+  }
+
+  const errBox = el('p', { class: 'text-tiny mb-2', style: 'color:var(--danger);display:none;' });
+  content.appendChild(errBox);
+
+  const btn = el('button', { class: 'btn btn-primary' }, 'Generar la contraseña');
+  btn.addEventListener('click', async () => {
+    errBox.style.display = 'none';
+    btn.disabled = true; btn.textContent = 'Generando…';
+    try {
+      const datos = {};
+      if (inNombre && inNombre.value.trim()) datos.full_name = inNombre.value.trim();
+      if (selNivel && selNivel.value) datos.declared_level = selNivel.value;
+      const api = await import('../api.js');
+      if (typeof api.darContrasenaProvisional !== 'function') {
+        throw new Error('Recarga la app (deslizando hacia abajo) y vuelve a intentarlo.');
+      }
+      const r = await api.darContrasenaProvisional(jugador.id, datos);
+      content.innerHTML = '';
+      content.appendChild(el('div', { class: 'sheet-title' }, 'Lista — dictasela ahora'));
+      content.appendChild(el('p', { class: 'text-tiny mb-2' },
+        'Esta contraseña solo se muestra UNA vez. Si se te pierde, genera otra.'));
+      content.appendChild(el('div', {
+        class: 'card',
+        style: 'text-align:center;font-size:24px;font-weight:800;letter-spacing:1px;'
+             + 'user-select:all;background:var(--surface-2);',
+      }, r.password));
+      content.appendChild(el('p', { class: 'text-tiny mt-3' },
+        `Entra a la app con su correo (${r.email}) y esa contraseña. En cuanto entre, la app le pide cambiarla.`));
+      const wa = waLinkJugador({ ...jugador, full_name: r.full_name });
+      if (wa) {
+        content.appendChild(el('a', {
+          class: 'btn btn-secondary mt-3', href: wa, target: '_blank', rel: 'noopener',
+          style: 'display:flex;align-items:center;justify-content:center;gap:8px;',
+        }, [el('span', { html: icon.whatsapp, style: 'width:18px;height:18px;' }), 'Abrir su WhatsApp']));
+        content.appendChild(el('p', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' },
+          'Por seguridad el mensaje NO lleva la contraseña escrita: dictasela tú.'));
+      }
+      content.appendChild(el('button', { class: 'btn btn-primary mt-3',
+        onclick: () => { handle.close(); refresh(); } }, 'Ya la anoté'));
+    } catch (err) {
+      errBox.textContent = humanizeError(err); errBox.style.display = 'block';
+      btn.disabled = false; btn.textContent = 'Generar la contraseña';
+    }
+  });
+  content.appendChild(btn);
+  content.appendChild(el('button', { class: 'btn btn-ghost mt-2', onclick: () => handle.close() }, 'Cancelar'));
+  const handle = openSheet(content);
 }
 
 /* ============================================================
@@ -400,6 +527,20 @@ async function cargarFicha(wrap, jugador) {
       + 'Complétalo con "Editar datos" si sabes quién es, o dale de baja si fue un registro que quedó a medias.',
     ]));
   }
+
+  // Lo que de verdad traba a la mayoría no es el perfil: es que nunca les
+  // llegó el correo para entrar (10 de 89 jugadores el 15 oct 2026). Esto le
+  // da una contraseña provisional para que pueda entrar HOY.
+  wrap.appendChild(el('div', { class: 'card mt-2' }, [
+    el('div', { style: 'font-weight:700;font-size:14.5px;' }, '¿No le llega el correo para entrar?'),
+    el('p', { class: 'text-tiny mt-1' },
+      jugador.password_provisional
+        ? 'Ya tiene una contraseña provisional puesta por recepción y todavía no la cambia. Puedes generarle otra si la perdió.'
+        : 'Genérale una contraseña provisional y dictasela. Entra con su correo y esa contraseña, y la app le pide cambiarla.'),
+    el('button', { class: 'btn btn-secondary btn-sm mt-2',
+      onclick: () => abrirContrasenaProvisional(jugador, refresh) },
+      jugador.password_provisional ? 'Generar otra contraseña' : 'Darle una contraseña provisional'),
+  ]));
 
   // ---- Registros activos próximos ----
   const registros = await getRegistrosActivosDeJugador(jugador.id);

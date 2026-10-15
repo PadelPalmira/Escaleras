@@ -196,11 +196,35 @@ async function pintarLista(wrap) {
     lista.forEach((esc) => wrap.appendChild(tarjetaNoche(wrap, esc, destacar, conteos[esc.id])));
   };
 
+  const ahora = new Date();
+  const yaAbrio = (e) => abreAlPublico(e.session_date) <= ahora;
+  const porAbrir = proximas.filter((e) => e.status !== 'cancelled' && !yaAbrio(e));
+
   seccion('Hoy', deHoy.filter((e) => e.status !== 'cancelled'), true);
   seccion('Sin cerrar — te faltó terminarlas', pendientes, true);
-  seccion('Ya vienen', proximas.filter((e) => e.status !== 'cancelled'), false);
+  seccion('Ya vienen', proximas.filter((e) => e.status !== 'cancelled' && yaAbrio(e)), false);
+  if (porAbrir.length) {
+    wrap.appendChild(el('div', { class: 'section-title' }, 'Todavía no abren al público'));
+    wrap.appendChild(el('p', { class: 'text-tiny mb-2', style: 'color:var(--text-tertiary);' },
+      'Los jugadores no las ven hasta el domingo a las 10:00 am, pero tú ya puedes apartarles '
+      + 'lugar a quien quieras desde adentro, con el botón + Agregar.'));
+    porAbrir.forEach((esc) => wrap.appendChild(tarjetaNoche(wrap, esc, false, conteos[esc.id])));
+  }
   seccion('Ya cerradas', cerradas, false);
   seccion('Canceladas', canceladas, false);
+}
+
+/* ¿Cuándo se le abre esta noche al público? El domingo anterior a las 10 am
+   (la misma regla que usa la base). Desde el 2.4 las noches se crean con dos
+   semanas de anticipación para que recepción pueda apartar lugares antes,
+   así que en la lista hay que distinguir las que el jugador todavía no ve. */
+function abreAlPublico(sessionDate) {
+  const d = new Date(sessionDate + 'T12:00:00Z');
+  const dow = d.getUTCDay();                       // 0 = domingo
+  const diasAlLunes = dow === 0 ? 6 : dow - 1;     // lunes = inicio de semana
+  const domingo = new Date(d);
+  domingo.setUTCDate(domingo.getUTCDate() - diasAlLunes - 1);
+  return new Date(domingo.toISOString().slice(0, 10) + 'T16:00:00Z'); // 10 am CDMX
 }
 
 /* Una noche cancelada tiene que poder contarse en una linea: quien la
@@ -231,6 +255,10 @@ function tarjetaNoche(wrap, esc, destacar, conteo) {
         el('div', { class: 'text-tiny mt-1' }, `${FORMAT_LABEL[ws.format] || ws.format}${ws.category ? ' · Cat ' + ws.category : ''} · ${formatHora(ws.start_time)}`),
         esc.status === 'cancelled'
           ? el('div', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' }, textoCancelacion(esc))
+          : null,
+        esc.status === 'scheduled' && abreAlPublico(esc.session_date) > new Date()
+          ? el('div', { class: 'text-tiny mt-1', style: 'color:var(--cyan);font-weight:700;' },
+              'Abre al público el ' + formatFechaHora(abreAlPublico(esc.session_date)))
           : null,
         c && enElAire > 0
           ? el('div', { class: 'text-tiny mt-1', style: 'color:var(--warning);font-weight:700;' },
@@ -322,6 +350,14 @@ async function pintarDetalle(wrap, escaleraId) {
   // importante es la ronda: el cupo se guarda en una linea y la lista se
   // pliega, para que la ronda viva quede lo mas arriba posible.
   if (esc.status === 'scheduled') {
+    if (abreAlPublico(esc.session_date) > new Date()) {
+      wrap.appendChild(el('div', { class: 'aviso aviso-neutral mt-3' }, [
+        el('strong', {}, 'Esta noche todavía no la ven los jugadores. '),
+        'Abre al público el ' + formatFechaHora(abreAlPublico(esc.session_date)) + '. '
+        + 'Mientras tanto puedes apartarle lugar a quien quieras con "+ Agregar": '
+        + 'a esa persona sí le aparece su lugar de inmediato.',
+      ]));
+    }
     wrap.appendChild(renderCuantosVan(esc, confirmados.length, cupo, enEspera.length, yaArranco, porConfirmar));
     wrap.appendChild(renderSinConfirmar(esc, ws, confirmados, refresh));
     wrap.appendChild(renderComenzar(esc, confirmados.length, cupo, faltan, completo, refresh, porConfirmar));
@@ -1441,6 +1477,31 @@ function abrirCapturaResultado(m, onChange) {
     saveBtn.disabled = true; saveBtn.textContent = 'Guardando…';
     try {
       if (m.status === 'completed') {
+        // ANTES de tocar nada: decirle a recepción qué va a pasar. Corregir
+        // la ronda 7 puede rearmar la 8 (y mover gente de cancha), o puede
+        // tocar solo los puntos. Hasta la 2.3 se enteraba DESPUÉS.
+        let pv = null;
+        try {
+          // Import dinámico a propósito: si el navegador todavía tiene en
+          // caché el api.js anterior (pasa los primeros minutos de cada
+          // deployment), un import estático de una función que aún no existe
+          // ahí tumba el módulo completo y la app no abre. Así, en el peor
+          // caso, se corrige sin el aviso previo.
+          const api = await import('../api.js');
+          if (typeof api.getPreviewCorreccion === 'function') pv = await api.getPreviewCorreccion(m.id);
+        } catch { pv = null; }
+        if (pv && pv.accion !== 'simple') {
+          const seguir = await confirmSheet({
+            title: pv.titulo,
+            body: pv.mensaje,
+            confirmLabel: pv.accion === 'rehacer' ? 'Sí, corregir y rearmar' : 'Sí, corregir',
+            danger: pv.accion === 'rehacer',
+          });
+          if (!seguir) {
+            saveBtn.disabled = false; saveBtn.textContent = 'Guardar marcador';
+            return;
+          }
+        }
         const res = await corregirResultadoPartido(m.id, sets, content._nota ? content._nota.value.trim() || null : null, gp);
         handle.close();
         onChange();
@@ -1448,9 +1509,11 @@ function abrirCapturaResultado(m, onChange) {
         // posteriores, reabre la escalera) — antes ese detalle se descartaba y
         // recepción solo veía "Marcador corregido.", sin enterarse de que había
         // que volver a capturar resultados o volver a cerrar la noche.
-        if (res && res.advertencia && (res.rondas_posteriores_borradas > 0 || res.escalera_reabierta || res.cashbacks_revocados > 0)) {
+        if (res && res.advertencia && (res.rondas_posteriores_borradas > 0 || res.escalera_reabierta
+            || res.cashbacks_revocados > 0 || res.solo_puntos)) {
           const aviso = el('div');
-          aviso.appendChild(el('div', { class: 'sheet-title' }, '⚠️ Corrección con efectos en cascada'));
+          aviso.appendChild(el('div', { class: 'sheet-title' },
+            res.solo_puntos ? 'Listo — se corrigieron los puntos' : '⚠️ Corrección con efectos en cascada'));
           aviso.appendChild(el('p', { class: 'text-muted mb-4' }, res.advertencia));
           aviso.appendChild(el('button', { class: 'btn btn-primary', onclick: () => avisoHandle.close() }, 'Entendido'));
           const avisoHandle = openSheet(aviso);
