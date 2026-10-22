@@ -210,8 +210,25 @@ async function pintarLista(wrap) {
       + 'lugar a quien quieras desde adentro, con el botón + Agregar.'));
     porAbrir.forEach((esc) => wrap.appendChild(tarjetaNoche(wrap, esc, false, conteos[esc.id])));
   }
-  seccion('Ya cerradas', cerradas, false);
-  seccion('Canceladas', canceladas, false);
+  // Con 60 días de historial estas listas se alargan, pero plegarlas completas
+  // deja una noche reciente a dos toques — justo lo contrario de lo que se
+  // pidió (poder ver rápido las Retas de viernes pasados). Las 10 más nuevas
+  // quedan a la vista y solo lo viejo se pliega.
+  conHistorial('Ya cerradas', cerradas);
+  conHistorial('Canceladas', canceladas);
+
+  function conHistorial(titulo, lista) {
+    if (!lista.length) return;
+    const recientes = lista.slice(0, 10);
+    const viejas = lista.slice(10);
+    wrap.appendChild(el('div', { class: 'section-title' }, titulo));
+    recientes.forEach((esc) => wrap.appendChild(tarjetaNoche(wrap, esc, false, conteos[esc.id])));
+    if (viejas.length) {
+      const cuerpo = el('div');
+      viejas.forEach((esc) => cuerpo.appendChild(tarjetaNoche(wrap, esc, false, conteos[esc.id])));
+      wrap.appendChild(plegable(`Más antiguas (${viejas.length})`, cuerpo));
+    }
+  }
 }
 
 /* ¿Cuándo se le abre esta noche al público? El domingo anterior a las 10 am
@@ -315,7 +332,7 @@ async function pintarDetalle(wrap, escaleraId) {
   wrap.appendChild(el('p', { class: 'text-muted mt-1' }, `${FORMAT_LABEL[ws.format] || ws.format}${ws.category ? ' · Cat ' + ws.category : ''} · ${formatHora(ws.start_time)}–${formatHora(ws.end_time)}`));
 
   if (ws.format === 'retas_abiertas') {
-    wrap.appendChild(el('div', { class: 'card mt-4' }, el('p', { class: 'text-muted' }, 'Retas Abiertas es 100% social — no otorga puntos ni tiene rondas capturables aquí.')));
+    wrap.appendChild(renderRetasAdmin(esc, registros));
     return;
   }
 
@@ -529,6 +546,78 @@ async function pintarDetalle(wrap, escaleraId) {
     mostrarAcomodo = false;
     abrirAcomodo(ultimaRonda, minutosRonda, refresh);
   }
+}
+
+/* ============================================================
+   Retas Abiertas vistas desde recepción
+   ------------------------------------------------------------
+   Antes esta pantalla era un callejón: decía "no hay nada que
+   capturar aquí" y punto, así que no había forma de ver quién
+   fue a las Retas de un viernes pasado. Ahora sale la lista
+   completa, con el tope real de 25 — que es dato interno: al
+   jugador la app nunca le enseña el número.
+   ============================================================ */
+function renderRetasAdmin(esc, registros) {
+  const box = el('div', { class: 'mt-4' });
+  const cupo = esc.capacity || null;
+  const dentro = registros.filter((r) => r.status === 'confirmed');
+  const fila = registros.filter((r) => r.status === 'waitlist')
+    .sort((a, b) => (a.waitlist_position || 99) - (b.waitlist_position || 99));
+  const salieron = registros.filter((r) => ['cancelled_ontime', 'cancelled_late'].includes(r.status));
+  const yaPaso = esc.session_date < todayISO() || esc.status === 'completed';
+
+  const head = el('div', { class: 'card' });
+  head.appendChild(el('div', { class: 'row-between' }, [
+    el('div', { style: 'font-size:30px;font-weight:800;line-height:1;' }, [
+      el('span', { style: cupo && dentro.length >= cupo ? 'color:var(--warning);' : 'color:var(--cyan);' },
+        String(dentro.length)),
+      cupo ? el('span', { style: 'color:var(--text-tertiary);font-size:20px;' }, ` / ${cupo}`) : null,
+    ]),
+    el('span', { class: `badge ${cupo && dentro.length >= cupo ? 'badge-warning' : 'badge-success'}` },
+      yaPaso ? 'Ya pasó' : (cupo && dentro.length >= cupo ? 'Lleno' : 'Abierta')),
+  ]));
+  head.appendChild(el('p', { class: 'text-tiny mt-2' },
+    cupo
+      ? `El tope de ${cupo} es interno: el jugador no ve el número, solo cuánta gente va. `
+        + 'Al llegar al tope, los que entren quedan en la fila y suben solos si alguien se sale.'
+      : 'Esta noche no tiene tope configurado.'));
+  if (!yaPaso) {
+    head.appendChild(el('p', { class: 'text-tiny mt-1', style: 'color:var(--text-tertiary);' },
+      'Las Retas no se arrancan ni se capturan: no reparten puntos. Se cierran solas al día siguiente.'));
+  }
+  box.appendChild(head);
+
+  const lista = (titulo, arr, extra) => {
+    if (!arr.length) return;
+    box.appendChild(el('div', { class: 'section-title' }, `${titulo} (${arr.length})`));
+    const card = el('div', { class: 'card' });
+    arr.forEach((r, i) => {
+      if (i > 0) card.appendChild(el('hr', { class: 'sep', style: 'margin:10px 0;' }));
+      card.appendChild(el('div', { class: 'row-between' }, [
+        el('div', { class: 'row gap-2', style: 'align-items:center;min-width:0;' }, [
+          el('span', { class: 'rank' }, String(i + 1)),
+          el('span', { class: 'avatar-mini' }, avatarContent(r.profiles || {})),
+          el('div', {}, [
+            el('div', { style: 'font-weight:600;font-size:14px;' },
+              (r.profiles && r.profiles.full_name) || '(sin nombre)'),
+            el('div', { class: 'text-tiny' }, extra ? extra(r) : ''),
+          ]),
+        ]),
+      ]));
+    });
+    box.appendChild(card);
+  };
+
+  lista('Quiénes van', dentro, (r) => (r.confirmed_at ? 'Se anotó ' + formatFechaHora(r.confirmed_at) : ''));
+  lista('En la fila', fila, (r) => (r.waitlist_position ? `Lugar ${r.waitlist_position}` : ''));
+  if (salieron.length) {
+    lista('Se salieron', salieron, (r) => (r.cancelled_at ? formatFechaHora(r.cancelled_at) : ''));
+  }
+  if (!dentro.length && !fila.length) {
+    box.appendChild(el('div', { class: 'card mt-3' },
+      el('p', { class: 'text-muted' }, 'Todavía no se anota nadie a esta noche.')));
+  }
+  return box;
 }
 
 /* ============================================================

@@ -709,8 +709,10 @@ export async function getEscalerasAdmin() {
   // día siguiente). Por eso se resta sobre la fecha CDMX de hoy (todayISO),
   // anclada a medianoche UTC solo para la aritmética de días — igual que
   // getProximasEscaleras.
+  // 60 días hacia atrás (antes 14): recepción pidió poder ver quién fue a las
+  // Retas de viernes pasados, y con dos semanas solo alcanzaban dos viernes.
   const desdeDate = new Date(todayISO() + 'T00:00:00Z');
-  desdeDate.setUTCDate(desdeDate.getUTCDate() - 14);
+  desdeDate.setUTCDate(desdeDate.getUTCDate() - 60);
   const desde = desdeDate.toISOString().slice(0, 10);
   // Las canceladas SI vienen: antes se filtraban y la noche simplemente
   // desaparecia de Administracion, sin rastro de quien la cancelo ni cuando

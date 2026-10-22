@@ -210,7 +210,7 @@ export function renderGuiaApp({ profile, recomendacion = null, esNuevo, onDone }
     ]));
 
     card.appendChild(el('p', { class: 'text-tiny mt-3', style: 'color:var(--text-tertiary);' },
-      'Los viernes son Retas Abiertas: nivel libre, sin cupo y sin puntos — llegas y juegas.'));
+      'Los viernes son Retas Abiertas: nivel libre y sin puntos — llegas y juegas.'));
     return card;
   }
 

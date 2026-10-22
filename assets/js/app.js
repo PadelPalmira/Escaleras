@@ -6,6 +6,7 @@ import { registerRoute, initRouter, navigate, currentRoute } from './router.js';
 import { getMyProfile, esAdminOMaestro, contarNotificacionesSinLeer, voyCalificadoLiguilla } from './api.js';
 import { renderLoginScreen, renderNuevaPassword } from './views/login.js';
 import { renderCompletarPerfil } from './views/completar_perfil.js';
+import { renderPonerPassword, yaLePreguntamosPorPassword } from './views/poner_password.js';
 import { renderGuiaApp } from './views/guia_app.js';
 import { renderHome } from './views/home.js';
 import { renderRanking } from './views/ranking.js';
@@ -187,6 +188,16 @@ async function showApp() {
   if (profile && !profile.app_guide_seen_at) {
     appEl.innerHTML = '';
     appEl.appendChild(renderGuiaApp({ profile, recomendacion: null, esNuevo: false, onDone: () => showApp() }));
+    return;
+  }
+
+  // Quien sigue entrando con enlace mágico y no tiene contraseña: se le
+  // ofrece ponerla UNA vez, con salida. La opción ya existía en Perfil pero
+  // escondida — al 19 oct 2026 solo 18 de 112 jugadores tenían contraseña,
+  // y es justo el correo lo que no les llega.
+  if (profile && !profile.password_set_at && !yaLePreguntamosPorPassword()) {
+    appEl.innerHTML = '';
+    appEl.appendChild(renderPonerPassword({ profile, onDone: () => showApp() }));
     return;
   }
 

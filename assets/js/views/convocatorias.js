@@ -43,7 +43,7 @@ async function parejasPorConfirmarSeguro(ids) {
 const FORMAT_HINT = {
   individual: 'Te anotas solo, pero siempre juegas en pareja: la app te asigna compañero en cada ronda y tu compañero anterior pasa a ser tu rival. Suben o bajan de cancha juntos según ganen o pierdan. Si no puedes ir, tú mismo eliges tu sustituto.',
   parejas: 'Juegas toda la noche con la misma pareja y suben o bajan de cancha juntos. Aquí no hay sustitutos: si uno no puede, se cae la pareja completa.',
-  retas_abiertas: 'Noche libre y social. No hay categorías, ni puntos, ni cupo: llegas y juegas el tiempo que quieras.',
+  retas_abiertas: 'Noche libre y social. No hay categorías ni puntos: llegas y juegas el tiempo que quieras.',
 };
 
 const STATUS_LABEL = {
@@ -1020,14 +1020,14 @@ async function abrirSelectorSustituto(f, profile, refresh) {
 }
 
 /* ============================================================
-   Retas Abiertas — sin cupo, sin puntos, con precio visible
+   Retas Abiertas — sin puntos, con precio visible
    ============================================================ */
 function renderRetas(f, profile, refresh) {
   const box = el('div');
   const inscrito = f.mi_status === 'confirmed';
   const enEspera = f.mi_status === 'waitlist';
   const precio = f.precio_mxn != null ? Number(f.precio_mxn) : 150;
-  const cupo = f.capacidad || null;
+  void f.capacidad;   // el tope existe, pero al jugador no se le enseña
 
   box.appendChild(el('div', { class: 'retas-precio mt-3' }, [
     el('div', {}, [
@@ -1036,7 +1036,7 @@ function renderRetas(f, profile, refresh) {
     ]),
     el('div', { class: 'text-tiny', style: 'text-align:right;max-width:60%;' },
       `Juegas todo el tiempo que quieras, de ${formatHora(f.start_time)} a ${formatHora(f.end_time)} · Se paga en recepción`
-      + (cupo ? ` · Hay ${cupo} lugares` : '')),
+),
   ]));
 
   const social = el('div', { class: 'retas-social mt-3' });
@@ -1052,8 +1052,8 @@ function renderRetas(f, profile, refresh) {
     box.appendChild(el('div', { class: 'aviso aviso-warn mt-3' }, [
       el('strong', {}, 'Vas en la lista de espera'
         + (f.mi_lugar_en_espera ? ` (lugar ${f.mi_lugar_en_espera})` : '') + '. '),
-      'La noche llegó a sus ' + (cupo || 25) + ' lugares. En Retas la gente entra y sale mucho, '
-      + 'así que la fila se mueve: si alguien se sale, entras solo y te avisamos.',
+      'Por hoy ya se llenó. En Retas la gente entra y sale mucho, así que la fila se mueve: '
+      + 'si alguien se sale, entras solo y te avisamos.',
     ]));
   }
 
@@ -1082,13 +1082,12 @@ function renderRetas(f, profile, refresh) {
   });
   box.appendChild(btn);
   box.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' },
-    cupo
-      ? `Anotarte no cuesta puntos ni te compromete a nada. Hay ${cupo} lugares; si ya se llenaron, entras a la lista de espera.`
-      : 'Anotarte no aparta lugar ni cuesta puntos — solo sirve para que todos vean quién va.'));
+    'Anotarte no cuesta puntos ni te compromete a nada — sirve para que el club sepa cuántos van.'));
 
   getInscritosRetas(f.escalera_id).then((inscritos) => {
-    countLine.querySelector('.retas-count-number').textContent =
-      cupo ? `${inscritos.length}/${cupo}` : String(inscritos.length);
+    // A propósito SIN el "/25": el tope de las Retas es información interna
+    // del club. El jugador ve cuánta gente va, nunca el límite (19 oct 2026).
+    countLine.querySelector('.retas-count-number').textContent = String(inscritos.length);
     countLine.querySelector('.retas-count-label').textContent =
       inscritos.length === 1 ? 'anotado esta noche' : 'anotados esta noche';
     namesLine.textContent = inscritos.length
@@ -1137,7 +1136,7 @@ const FORMATO_EXPLICADO = {
   retas_abiertas: {
     titulo: 'Retas Abiertas — noche libre',
     puntos: [
-      'Nivel libre, sin categorías y sin cupo: llegas y juegas.',
+      'Nivel libre, sin categorías y sin puntos: llegas y juegas.',
       'No reparte puntos, ni ranking, ni cashback.',
       'Formato "rey de la cancha": se juega a 4 games, el que gana se queda.',
       'Anotarte aquí no aparta lugar: es para que el club vea cuántos van.',
@@ -1426,11 +1425,7 @@ function renderInvitarWhatsapp(f) {
   box.appendChild(el('div', { style: 'font-weight:800;font-size:14.5px;' }, '¿Falta gente? Jálalos'));
   box.appendChild(el('p', { class: 'text-tiny mt-1' },
     f.formato === 'retas_abiertas'
-      ? (f.capacidad && f.ocupados >= f.capacidad
-          ? `Ya se llenaron los ${f.capacidad} lugares, pero la fila se mueve: si invitas a alguien, se anota a la lista de espera.`
-          : (f.capacidad
-              ? `Quedan ${Math.max(f.capacidad - f.ocupados, 0)} de ${f.capacidad} lugares. Comparte la noche con quien quieras.`
-              : 'Comparte la noche con quien quieras: en Retas Abiertas no hay cupo.'))
+      ? 'Comparte la noche con quien quieras — entre más seamos, mejor.'
       : (faltan > 0
           ? `Faltan ${faltan} ${esParejas ? (faltan === 1 ? 'pareja' : 'parejas') : (faltan === 1 ? 'lugar' : 'lugares')} para llenar la noche. Mándale el mensaje a quien quieras.`
           : 'La noche ya está llena, pero puedes invitar a alguien a la lista de espera.')));
