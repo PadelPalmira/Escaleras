@@ -1234,6 +1234,19 @@ export async function renderConvocatoriaDetalle() {
     ]));
   }
 
+  /* ---------- La noche de la Liguilla no es una escalera ----------
+     La tarjeta de la lista sí lo decía y salía temprano, pero ESTA página
+     no lo revisaba: caía hasta renderAcciones y le ofrecía "Registrarme
+     con pareja" a cualquiera. La base siempre lo bloqueó ("Esa noche se
+     juega la Liguilla del mes"), así que nadie se coló — pero el jugador
+     elegía pareja, le picaba y recibía un error en la cara, justo el día
+     de la Liguilla. Aquí se corta antes y se le dice qué es esa noche y
+     si él está dentro. */
+  if (f.es_liguilla) {
+    wrap.appendChild(renderPanelLiguilla(f));
+    return wrap;
+  }
+
   /* ---------- Cupo (en Parejas se cuenta por parejas, no por personas) ---------- */
   if (!cancelada && f.formato !== 'retas_abiertas') {
     const cap = f.capacidad || 12;
@@ -1327,6 +1340,53 @@ export async function renderConvocatoriaDetalle() {
   }
 
   return wrap;
+}
+
+/* Qué ve el jugador cuando abre la noche de la Liguilla del mes.
+   Tres casos distintos, porque "no hay escalera normal" a secas deja al
+   calificado sin saber qué hacer y al de lista de espera sin saber que
+   todavía puede entrar. */
+function renderPanelLiguilla(f) {
+  const caja = el('div', { class: 'card mt-3', style: 'border-color:var(--oro);' });
+  caja.appendChild(el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
+    el('span', { html: icon.trophy, style: 'width:19px;height:19px;color:var(--oro);' }),
+    el('div', { style: 'font-weight:800;font-size:15px;' }, 'Esta noche se juega la Liguilla del mes'),
+  ]));
+  caja.appendChild(el('p', { class: 'text-tiny mt-2' },
+    'No hay escalera normal este día y no se puede uno anotar aquí: juegan los 12 '
+    + 'que calificaron por el ranking de la categoría.'));
+
+  const estado = el('div', { class: 'mt-3' });
+  caja.appendChild(estado);
+  caja.appendChild(el('button', {
+    class: 'btn btn-primary mt-3',
+    onclick: () => navigate('/liguilla'),
+  }, 'Ir a la Liguilla'));
+
+  // Su situación real sale de la pestaña Liguilla; aquí solo se adelanta
+  // la respuesta a "¿y yo juego o no?".
+  (async () => {
+    try {
+      const api = await import('../api.js');
+      if (typeof api.getMiCarreraLiguilla !== 'function') return;
+      const tier = f.categoria === 'A' ? 'liguilla_a' : 'ascenso_b';
+      const c = await api.getMiCarreraLiguilla(tier);
+      if (!c) return;
+      if (c.ya_calificado) {
+        estado.appendChild(el('div', { class: 'aviso aviso-ok' },
+          'Tú estás dentro. Confirma tu lugar y elige pareja desde la pestaña Liguilla.'));
+      } else if (c.mi_rank != null) {
+        estado.appendChild(el('div', { class: 'aviso aviso-warn' },
+          `Esta vez no entraste: vas en el lugar ${c.mi_rank} de la carrera. `
+          + 'Si alguien no confirma, los de la fila entran en orden.'));
+      }
+    } catch (err) {
+      // Si falla, la tarjeta ya explicó lo esencial.
+      console.error('No se pudo saber tu situación de Liguilla:', err);
+    }
+  })();
+
+  return caja;
 }
 
 /* Lista de inscritos. En Parejas Fijas los dos jugadores de una pareja salen
