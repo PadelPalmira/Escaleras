@@ -1388,27 +1388,48 @@ function filaSolo(g, num, esEspera) {
   ]);
 }
 
+/* Un recuadro de jugador: su foto y su nombre. Dos de estos, pegados
+   dentro de .pareja-cajas, son una pareja (2.6). */
+function cajaJugador(persona, { pendiente = false, etiqueta = null, vacio = false } = {}) {
+  const clases = ['pareja-caja'];
+  if (pendiente) clases.push('pc-pendiente');
+  if (vacio) clases.push('pc-vacio');
+  return el('div', { class: clases.join(' ') }, [
+    el('span', { class: 'avatar' }, vacio ? '?' : avatarContent(persona)),
+    el('div', { class: 'pc-nombre' }, [
+      el('div', { class: 'n' }, vacio ? 'Falta pareja' : ((persona && persona.full_name) || 'Jugador')),
+      etiqueta ? el('div', { class: 'm' }, etiqueta) : null,
+    ]),
+  ]);
+}
+
 function filaPareja(g, num, esEspera) {
   // OJO con quién es quién: la fila que trae partner_status='pending' es la
   // del jugador INVITADO (el que todavía no acepta), y su "partner_nombre"
   // es quien lo invitó. Decirlo al revés sería señalar al que sí confirmó.
   const pendiente = g.partner_status === 'pending';
-  const invitado = pendiente ? g.full_name : null;
-  const nombres = g.partner_nombre
-    ? (pendiente ? `${g.partner_nombre} + ${g.full_name}` : `${g.full_name} + ${g.partner_nombre}`)
-    : g.full_name;
+  const elOtro = { full_name: g.partner_nombre, avatar_url: g.partner_avatar };
+
+  let izq;
+  let der;
+  if (pendiente) {
+    // Izquierda quien apartó, derecha quien falta: se lee en ese orden.
+    izq = cajaJugador(elOtro, { etiqueta: 'Apartó el lugar' });
+    der = cajaJugador(g, {
+      pendiente: true,
+      etiqueta: `No ha aceptado${g.expira_en ? ' · ' + textoTiempoRestante(g.expira_en) : ''}`,
+    });
+  } else if (!g.partner_nombre) {
+    izq = cajaJugador(g);
+    der = cajaJugador(null, { vacio: true, pendiente: true });
+  } else {
+    izq = cajaJugador(g);
+    der = cajaJugador(elOtro);
+  }
+
   return el('div', { class: 'list-row' }, [
     el('span', { class: 'rank', style: esEspera ? 'color:var(--warning);' : '' }, String(num)),
-    el('span', { class: 'avatar' }, avatarContent(pendiente ? { full_name: g.partner_nombre, avatar_url: g.partner_avatar } : g)),
-    el('span', { class: 'avatar', style: 'margin-left:-14px;border:2px solid var(--surface);' },
-      avatarContent(pendiente ? g : { full_name: g.partner_nombre, avatar_url: g.partner_avatar })),
-    el('div', { style: 'min-width:0;margin-left:4px;' }, [
-      el('div', { class: 'name' }, nombres),
-      pendiente
-        ? el('div', { class: 'meta', style: 'color:var(--warning);' },
-            `${invitado} todavía no acepta${g.expira_en ? ' · ' + textoTiempoRestante(g.expira_en) : ''}`)
-        : (!g.partner_nombre ? el('div', { class: 'meta', style: 'color:var(--warning);' }, 'Le falta pareja') : null),
-    ]),
+    el('div', { class: 'pareja-cajas' }, [izq, der]),
   ]);
 }
 

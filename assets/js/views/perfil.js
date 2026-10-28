@@ -382,6 +382,10 @@ export async function renderPerfil() {
     ])
   );
 
+  // Avisos al celular. Va arriba de la lista de notificaciones a
+  // proposito: es la respuesta a "no me enteré".
+  wrap.appendChild(await renderTarjetaAvisosPush());
+
   // Notificaciones
   const sinLeer = (notificaciones || []).filter((n) => !n.read_at);
   wrap.appendChild(el('div', { class: 'section-title' }, `Notificaciones${sinLeer.length > 0 ? ` (${sinLeer.length})` : ''}`));
@@ -659,4 +663,116 @@ export async function renderPerfil() {
   wrap.appendChild(logoutBtn);
 
   return wrap;
+}
+
+/* ============================================================
+   Avisos al celular (deployment 2.6)
+   ------------------------------------------------------------
+   Hasta ahora los avisos solo vivian dentro de la app y casi
+   nadie los leia (de 94 avisos de un tipo, 9 leidos). Aqui el
+   jugador los prende para que le lleguen al telefono.
+
+   push.js entra por import dinamico a proposito: es un archivo
+   nuevo de este deployment, y si un navegador tiene cacheado el
+   perfil.js nuevo pero todavia no bajo push.js, la pantalla se
+   degrada en vez de tumbarse.
+   ============================================================ */
+async function renderTarjetaAvisosPush() {
+  const card = el('div', { class: 'card mt-3' });
+
+  let push;
+  try { push = await import('../push.js'); } catch { return el('div'); }
+  if (!push.soportaPush() && !push.faltaInstalarEnIOS()) return el('div');
+
+  async function pintar() {
+    card.innerHTML = '';
+    card.appendChild(el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
+      el('span', { html: icon.bell, style: 'width:18px;height:18px;color:var(--cyan);' }),
+      el('div', { style: 'font-weight:800;font-size:14.5px;' }, 'Avisos a tu celular'),
+    ]));
+
+    // iPhone sin instalar: el boton no puede funcionar, asi que no se pone.
+    if (push.faltaInstalarEnIOS()) {
+      card.appendChild(el('p', { class: 'text-tiny mt-2' },
+        'En iPhone los avisos solo funcionan con la app instalada en tu pantalla de inicio. '
+        + 'Toca el botón de Compartir de Safari, luego "Agregar a inicio", y abre la app desde ahí. '
+        + 'Después vuelve aquí y préndelos.'));
+      return;
+    }
+
+    const permiso = push.permisoActual();
+    if (permiso === 'denied') {
+      card.appendChild(el('p', { class: 'text-tiny mt-2' },
+        'Están bloqueados para esta app. Se vuelven a permitir desde los ajustes de tu navegador, '
+        + 'en Notificaciones, y luego vuelves a entrar aquí.'));
+      return;
+    }
+
+    const activo = await push.haySuscripcionLocal();
+
+    if (activo) {
+      card.appendChild(el('div', { class: 'row-between mt-2' }, [
+        el('p', { class: 'text-tiny', style: 'margin:0;' },
+          'Prendidos en este dispositivo. Te avisamos de tu noche, de un lugar que se libere y de tu pareja.'),
+        el('span', { class: 'badge badge-success' }, 'Activos'),
+      ]));
+
+      const fila = el('div', { class: 'row gap-2 mt-3', style: 'flex-wrap:wrap;' });
+      fila.appendChild(el('button', {
+        class: 'btn btn-secondary btn-sm', style: 'width:auto;',
+        onclick: async (e) => {
+          e.target.disabled = true;
+          const previo = e.target.textContent;
+          e.target.textContent = 'Mandando…';
+          try {
+            // Import dinámico con guarda: pushDePrueba es nueva de este
+            // deployment y perfil.js lo importa app.js de forma estática —
+            // un import estático de algo que el api.js en caché todavía no
+            // tiene no rompería esta tarjeta, rompería el arranque entero.
+            const apiMod = await import('../api.js');
+            if (typeof apiMod.pushDePrueba !== 'function') {
+              throw new Error('Cierra la app y vuelve a abrirla para usar esto.');
+            }
+            const msg = await apiMod.pushDePrueba();
+            toast(msg || 'Te mandamos uno de prueba: llega en menos de un minuto.', 'success');
+          } catch (err) { toast(humanizeError(err), 'error'); }
+          e.target.disabled = false;
+          e.target.textContent = previo;
+        },
+      }, 'Mandarme uno de prueba'));
+      fila.appendChild(el('button', {
+        class: 'btn btn-ghost btn-sm', style: 'width:auto;',
+        onclick: async (e) => {
+          e.target.disabled = true;
+          try { await push.desactivarAvisos(); await pintar(); }
+          catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
+        },
+      }, 'Apagarlos'));
+      card.appendChild(fila);
+      return;
+    }
+
+    card.appendChild(el('p', { class: 'text-tiny mt-2' },
+      'Préndelos y te llega un aviso al teléfono el día que juegas, cuando se libera un lugar '
+      + 'que te toca, y cuando tu pareja confirma. Sin esto, los avisos solo se ven si abres la app.'));
+    card.appendChild(el('button', {
+      class: 'btn btn-primary btn-sm mt-3', style: 'width:auto;',
+      onclick: async (e) => {
+        e.target.disabled = true;
+        const previo = e.target.textContent;
+        e.target.textContent = 'Activando…';
+        try {
+          const r = await push.activarAvisos();
+          if (r.ok) { toast('Listo, ya te van a llegar al celular.', 'success'); await pintar(); }
+          else { toast(r.motivo, 'error'); e.target.disabled = false; e.target.textContent = previo; await pintar(); }
+        } catch (err) {
+          toast(humanizeError(err), 'error');
+          e.target.disabled = false; e.target.textContent = previo;
+        }
+      },
+    }, 'Prender los avisos'));
+  }
+
+  await pintar();
+  return card;
 }

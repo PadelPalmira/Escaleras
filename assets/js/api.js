@@ -1450,3 +1450,66 @@ export async function marcarPasswordPropia() {
   const { error } = await supabase.rpc('marcar_password_propia');
   if (error) throw error;
 }
+
+/* =====================================================================
+   Deployment 2.6 — la carrera de la Liguilla, de UNA sola fuente
+   ---------------------------------------------------------------------
+   liguilla_tabla_vivo (la vieja) ORDENA por promedio por noche pero
+   DEVUELVE el acumulado, y marca "calificado" a cualquiera en el top 12
+   sin revisar el mínimo de noches. O sea: el número que enseña no es el
+   número con el que decide. liguilla_carrera_tabla lee de
+   liguilla_carrera_base — la misma de la que sale mi_carrera_liguilla —
+   y trae promedio, acumulado, noches, si es elegible y cuántas noches le
+   faltan. Se usa SIEMPRE esta; la vieja sigue viva en la base solo
+   porque no se pudo dropear.
+   ===================================================================== */
+export async function getLiguillaCarreraTabla(tier, limite = 25) {
+  const { data, error } = await supabase.rpc('liguilla_carrera_tabla', { p_tier: tier, p_limite: limite });
+  if (error) throw error;
+  return data || [];
+}
+
+/* =====================================================================
+   Deployment 2.6 — avisos al celular (Web Push)
+   ---------------------------------------------------------------------
+   El backend ya estaba completo desde antes (push_subscriptions,
+   push_cola, push_marcar y la edge function 'enviar-push' con VAPID
+   propio, corriendo cada minuto). Lo que faltaba era esta mitad: que el
+   navegador se suscriba y guarde su endpoint. Hasta el 28 oct 2026 habia
+   0 suscripciones, asi que el cron llevaba meses entregando nada.
+   ===================================================================== */
+
+/* La llave publica VAPID sale de la base, no escrita aqui, para que el
+   navegador y la funcion de envio nunca se desincronicen si se rota. */
+export async function getVapidPublica() {
+  const { data, error } = await supabase.rpc('vapid_publica');
+  if (error) throw error;
+  return data || null;
+}
+
+/* ¿Este dispositivo ya esta suscrito? (lo contesta la base, no el navegador) */
+export async function tengoPushActivo() {
+  const { data, error } = await supabase.rpc('tengo_push_activo');
+  if (error) throw error;
+  return data === true;
+}
+
+export async function guardarPushSubscription({ endpoint, p256dh, auth, userAgent }) {
+  const { error } = await supabase.rpc('guardar_push_subscription', {
+    p_endpoint: endpoint, p_p256dh: p256dh, p_auth: auth, p_user_agent: userAgent || null,
+  });
+  if (error) throw error;
+}
+
+export async function borrarPushSubscription(endpoint) {
+  const { error } = await supabase.rpc('borrar_push_subscription', { p_endpoint: endpoint });
+  if (error) throw error;
+}
+
+/* Se manda un aviso a este mismo dispositivo para comprobar que de verdad
+   llega. Lo encola la base; el cron lo despacha en menos de un minuto. */
+export async function pushDePrueba() {
+  const { data, error } = await supabase.rpc('push_de_prueba');
+  if (error) throw error;
+  return data;
+}

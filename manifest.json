@@ -1,0 +1,25 @@
+{
+  "id": "escaleras-padel-palmira",
+  "name": "Escaleras Padel Palmira",
+  "short_name": "Escaleras",
+  "description": "Ranking, convocatorias y Liguilla del club Padel Palmira.",
+  "lang": "es-MX",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0b0d",
+  "theme_color": "#0b0b0d",
+  "categories": ["sports"],
+  "icons": [
+    { "src": "assets/img/icon-192.png",     "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/img/favicon.png",      "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/img/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "assets/img/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Convocatorias", "url": "./#/convocatorias", "icons": [{ "src": "assets/img/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Liguilla",      "url": "./#/liguilla",      "icons": [{ "src": "assets/img/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

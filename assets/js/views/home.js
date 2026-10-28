@@ -6,6 +6,7 @@ import {
   esAdminOMaestro, esMaestro, getEscalerasAdmin, getConteosRegistros,
   getMiRondaActual, horaServidor,
   getNotificacionesUrgentes, marcarNotificacionLeida,
+  getMisConvocatorias, getMiCarreraLiguilla, getParejasPorConfirmar,
   getLiguillaEventosAdmin, getCalificadosLiguillaAdmin, getParejasLiguilla, getLiguillaEventStartTs,
   getAlertasRecepcion,
 } from '../api.js';
@@ -54,6 +55,29 @@ async function renderInicioJugador(profile) {
   // un no-show con penalizacion.
   let urgentes = [];
   try { urgentes = profile ? await getNotificacionesUrgentes(profile.id, 3) : []; } catch { urgentes = []; }
+
+  // 2.6 — La convocatoria abierta que esta MAS CERCA de jugarse, sin filtrar
+  // por nivel: mis_convocatorias ya devuelve A y B para todos (el nivel solo
+  // marca cual es la "recomendada"). Antes el Inicio no sugeria ninguna y el
+  // jugador tenia que entrar a buscarla; con 44 noches programadas y 7
+  // jugadas en 60 dias, el problema no era que no quisieran — era que nadie
+  // veia a tiempo que faltaba gente.
+  let convocatorias = [];
+  try { convocatorias = await getMisConvocatorias(9); } catch { convocatorias = []; }
+
+  // Las parejas que apartaron pero NO han aceptado no vienen en
+  // mis_convocatorias: hay que pedirlas aparte. Sin esto la tarjeta diria
+  // "van 2 de 6" contando una pareja que puede caerse sola — que es
+  // exactamente la mentira del 8 de octubre ("6 de 6" cuando no eran 6).
+  const nocheSugerida = sugerenciaConvocatoria(convocatorias);
+  if (nocheSugerida && nocheSugerida.formato === 'parejas') {
+    try {
+      const pend = await getParejasPorConfirmar([nocheSugerida.escalera_id]);
+      if (pend && pend[nocheSugerida.escalera_id]) {
+        nocheSugerida.por_confirmar = pend[nocheSugerida.escalera_id].jugadores;
+      }
+    } catch { /* si falla, se omite el matiz en vez de inventarlo */ }
+  }
 
   const hoy = todayISO();
   const registroHoy = registros.find((r) => r.escaleras && r.escaleras.session_date === hoy && ['confirmed', 'substitute', 'waitlist'].includes(r.status));
@@ -132,22 +156,44 @@ async function renderInicioJugador(profile) {
       ])
     );
   } else {
+    // El boton de "ver convocatorias" ya no va aqui: lo lleva la tarjeta de
+    // sugerencia de abajo, que ademas dice cual y cuanta gente falta. Si no
+    // hay ninguna abierta, esta tarjeta se queda con el boton.
+    // El boton no va aqui: lo pone siempre renderSugerenciaConvocatoria,
+    // con o sin sugerencia, para que no salgan dos botones iguales pegados.
+    const hayQueSugerir = !!nocheSugerida;
     wrap.appendChild(
       el('div', { class: 'card mt-4' }, [
         el('div', { class: 'h2' }, 'Hoy no juegas'),
-        el('p', { class: 'text-muted mt-2' }, 'Revisa las convocatorias abiertas de la semana.'),
-        el('button', { class: 'btn btn-primary mt-4', onclick: () => navigate('/convocatorias') }, 'Ver convocatorias'),
+        el('p', { class: 'text-muted mt-2' }, hayQueSugerir
+          ? 'Esto es lo que sigue esta semana.'
+          : 'Ahorita no hay ninguna convocatoria abierta. Abren el domingo.'),
       ])
     );
   }
+
+  // Sugerencia + puerta a todas las convocatorias.
+  wrap.appendChild(renderSugerenciaConvocatoria(nocheSugerida));
 
   // Tu posición EN CADA categoría: ya no hay una sola "tu categoría" — cada
   // quien elige dónde jugar, así que puede tener lugar en A, en B, en las
   // dos, o en ninguna todavía.
   wrap.appendChild(el('div', { class: 'section-title' }, 'Tu ranking'));
   if (categoriasConDatos.length > 0) {
+    // 2.6 — Cuanto te falta para la Liguilla, al lado de tus puntos. Antes
+    // esto solo existia en la pestana de Liguilla y ahi casi nadie podia
+    // verlo (se exigia ir YA dentro del top 12). Es el dato que convierte
+    // "jugue una noche" en "me faltan 14 puntos".
+    const carreras = {};
+    await Promise.all(categoriasConDatos.map(async (cat) => {
+      const tier = cat === 'A' ? 'liguilla_a' : 'ascenso_b';
+      try { carreras[cat] = await getMiCarreraLiguilla(tier); }
+      catch { carreras[cat] = null; }
+    }));
+
     categoriasConDatos.forEach((cat) => {
       const c = porCategoria[cat];
+      const carrera = carreras[cat];
       wrap.appendChild(
         el('div', { class: 'card mt-2' }, [
           el('div', { class: 'row-between' }, [
@@ -170,6 +216,7 @@ async function renderInicioJugador(profile) {
               el('div', { class: 'stat-label' }, 'Noches'),
             ]),
           ]),
+          renderFaltanteLiguilla(carrera),
         ])
       );
     });
@@ -230,6 +277,149 @@ async function renderInicioJugador(profile) {
     console.error('Error cargando banner de Liguilla:', err);
   }
 
+  return wrap;
+}
+
+/* Cuanto te falta para la Liguilla, debajo de tus numeros del ranking.
+   La RPC mi_carrera_liguilla ya trae todo resuelto del lado del servidor:
+   ya_calificado, margen (de colchon si vas dentro, lo que falta si no),
+   aun_posible y un mensaje. Aqui solo se elige la version corta, porque la
+   larga ya vive en la pestana de Liguilla. Si la RPC falla o el jugador
+   todavia no tiene carrera, no se pinta nada — nunca un hueco raro. */
+function renderFaltanteLiguilla(carrera) {
+  if (!carrera || carrera.mi_rank == null) return null;
+
+  const fila = el('button', {
+    class: 'fila-enlace mt-3',
+    style: 'width:100%;background:transparent;border:0;padding:10px 0 0;border-top:1px solid var(--border);',
+    onclick: () => navigate('/liguilla'),
+  });
+
+  let texto;
+  let color = 'var(--text-secondary)';
+  if (carrera.ya_calificado) {
+    texto = carrera.margen == null
+      ? 'Vas calificado a la Liguilla'
+      : `Vas calificado · ${Number(carrera.margen).toFixed(0)} pts de colchón`;
+    color = 'var(--oro)';
+  } else if (carrera.aun_posible === false) {
+    texto = 'Este mes ya no alcanzas la Liguilla';
+    color = 'var(--text-tertiary)';
+  } else if (carrera.margen != null) {
+    texto = `Te faltan ${Number(carrera.margen).toFixed(0)} pts para la Liguilla`;
+    color = 'var(--warning)';
+  } else {
+    texto = 'Todavía no hay línea de corte este mes';
+  }
+
+  fila.appendChild(el('div', { class: 'row-between', style: 'align-items:center;' }, [
+    el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
+      el('span', { html: icon.trophy, style: `width:15px;height:15px;color:${color};` }),
+      el('span', { style: `font-size:12.5px;font-weight:700;color:${color};` }, texto),
+    ]),
+    el('span', { html: icon.chevronRight, style: 'width:16px;height:16px;color:var(--text-tertiary);' }),
+  ]));
+  return fila;
+}
+
+/* ============================================================
+   La convocatoria que esta mas cerca de jugarse (2.6)
+   ------------------------------------------------------------
+   Se elige SIN mirar el nivel del jugador: el nivel solo decide
+   cual es la "recomendada", no a cuales puede entrar (lo verifique
+   anotando un 7ma varonil principiante a Individual B: entra).
+   Se excluyen las noches donde ya tiene lugar — esas ya salen en
+   "Hoy juegas" y en "Tus proximas sesiones" — y la Liguilla, que
+   tiene su propia pestana y no es de libre inscripcion.
+   ============================================================ */
+function sugerenciaConvocatoria(convocatorias) {
+  const candidatas = (convocatorias || []).filter((f) => {
+    if (!f.ventana_abierta) return false;
+    if (f.es_liguilla) return false;
+    if (f.esc_status && f.esc_status !== 'scheduled') return false;
+    // Ya tiene lugar (o esta en la fila): no es algo que sugerirle.
+    if (f.mi_registro_id && ['confirmed', 'substitute', 'waitlist'].includes(f.mi_status)) return false;
+    // Ya paso la hora de inicio: sugerir algo que ya empezo es ruido.
+    if (f.horas_faltantes != null && f.horas_faltantes <= 0) return false;
+    return true;
+  });
+  if (candidatas.length === 0) return null;
+  candidatas.sort((a, b) => {
+    const ha = a.horas_faltantes == null ? 1e9 : a.horas_faltantes;
+    const hb = b.horas_faltantes == null ? 1e9 : b.horas_faltantes;
+    if (ha !== hb) return ha - hb;
+    return String(a.session_date).localeCompare(String(b.session_date));
+  });
+  return candidatas[0];
+}
+
+const FORMATO_LARGO = { individual: 'Individual', parejas: 'Parejas Fijas', retas_abiertas: 'Retas Abiertas' };
+
+function renderSugerenciaConvocatoria(f) {
+  const wrap = el('div');
+
+  if (f) {
+    const esParejas = f.formato === 'parejas';
+    const esRetas = f.formato === 'retas_abiertas';
+    const card = el('div', { class: 'card mt-4', style: 'border-color:var(--cyan);' });
+
+    card.appendChild(el('div', { class: 'row-between' }, [
+      el('div', { class: 'text-tiny', style: 'text-transform:uppercase;letter-spacing:0.06em;color:var(--text-tertiary);font-weight:800;' },
+        'Lo que sigue'),
+      f.categoria ? el('span', { class: `badge ${CAT_BADGE_CLASS[f.categoria] || 'badge-neutral'}` },
+        CAT_LABEL[f.categoria] || f.categoria) : null,
+    ]));
+    card.appendChild(el('div', { class: 'h2 mt-2' }, FORMATO_LARGO[f.formato] || f.formato));
+    card.appendChild(el('p', { class: 'text-muted mt-1' }, formatFecha(f.session_date)));
+    card.appendChild(el('p', { class: 'text-muted' },
+      `${formatHora(f.start_time)}${f.end_time ? ' – ' + formatHora(f.end_time) : ''}`));
+
+    // En Retas NO se enseña conteo ni cupo: el tope de 25 es solo para
+    // recepcion (instruccion del 22 oct 2026). Decir "faltan N" aqui seria
+    // justo la fuga que se cerro en el 2.5.
+    if (esRetas) {
+      card.appendChild(el('p', { class: 'text-tiny mt-3' }, 'Nivel libre y sin puntos. Se paga en recepción.'));
+    } else {
+      const cap = f.capacidad || 12;
+      const total = esParejas ? Math.floor(cap / 2) : cap;
+      const van = esParejas ? Math.floor((f.ocupados || 0) / 2) : (f.ocupados || 0);
+      // Los que apartaron sin confirmar se cuentan aparte: ese lugar se
+      // puede caer solo y quien lo quiera tiene derecho a saberlo.
+      const enElAire = esParejas
+        ? Math.floor((f.por_confirmar || 0) / 2)
+        : (f.por_confirmar || 0);
+      const firmes = Math.max(van - enElAire, 0);
+      const faltan = Math.max(total - van, 0);
+      const unidad = esParejas ? (faltan === 1 ? 'pareja' : 'parejas') : (faltan === 1 ? 'jugador' : 'jugadores');
+      const sinConfirmar = enElAire > 0
+        ? ` ${enElAire} ${esParejas ? (enElAire === 1 ? 'pareja' : 'parejas') : (enElAire === 1 ? 'jugador' : 'jugadores')} sin confirmar.`
+        : '';
+      card.appendChild(el('div', { class: `aviso ${faltan > 0 || enElAire > 0 ? 'aviso-warn' : 'aviso-info'} mt-3` },
+        faltan > 0
+          ? `Van ${firmes} de ${total} en firme.${sinConfirmar} Faltan ${faltan} ${unidad} para que esta noche se juegue.`
+          : (enElAire > 0
+              ? `Está completa, pero solo ${firmes} de ${total} en firme.${sinConfirmar}`
+              : `Ya está completa (${van} de ${total}). Te puedes anotar a la lista de espera.`)));
+    }
+
+    card.appendChild(el('button', {
+      class: 'btn btn-primary mt-3',
+      onclick: () => navigate('/convocatoria?id=' + f.escalera_id),
+    }, 'Ver esta convocatoria'));
+    card.appendChild(el('button', {
+      class: 'btn btn-ghost btn-sm mt-2',
+      onclick: () => navigate('/convocatorias'),
+    }, 'Ver todas las convocatorias'));
+    wrap.appendChild(card);
+    return wrap;
+  }
+
+  // Sin nada abierto: el boton a todas las convocatorias se mantiene
+  // siempre, porque es la puerta que el jugador viene a buscar.
+  wrap.appendChild(el('button', {
+    class: 'btn btn-secondary mt-4',
+    onclick: () => navigate('/convocatorias'),
+  }, 'Ver todas las convocatorias'));
   return wrap;
 }
 

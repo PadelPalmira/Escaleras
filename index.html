@@ -2,10 +2,20 @@
 <html lang="es-MX">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<!-- Sin maximum-scale: bloquear el zoom deja fuera a quien no ve de cerca. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Escaleras Padel Palmira</title>
 <meta name="description" content="Ranking, convocatorias y Liguilla del club Padel Palmira." />
 <meta name="theme-color" content="#0b0b0d" />
+
+<!-- Instalable en la pantalla de inicio. En iPhone, ademas, es el requisito
+     para que los avisos push puedan llegar (iOS 16.4+). -->
+<link rel="manifest" href="manifest.json" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Escaleras" />
+<meta name="mobile-web-app-capable" content="yes" />
+
 <link rel="icon" type="image/png" sizes="32x32" href="assets/img/favicon-32.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="assets/img/favicon.png" />
 <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png" />
@@ -23,10 +33,37 @@
   </div>
 </div>
 
-<script type="module" src="https://esm.sh/@supabase/supabase-js@2"></script>
+<!-- El SDK de Supabase se carga de un CDN externo. Si ese CDN falla, antes
+     se quedaba el spinner girando para siempre y parecia que la app estaba
+     muerta; ahora se avisa y se ofrece recargar. -->
 <script type="module">
   import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
   window.supabase = { createClient };
+</script>
+<script type="module">
+  // Si en 12 segundos no existe window.supabase, el modulo de arriba no
+  // cargo (CDN caido, red del jugador, o una red que lo bloquea).
+  const esperar = async () => {
+    for (let i = 0; i < 60; i++) {
+      if (window.supabase && window.supabase.createClient) return true;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return false;
+  };
+  if (!(await esperar())) {
+    document.getElementById('app').innerHTML =
+      '<div class="stack" style="min-height:100vh;align-items:center;justify-content:center;'
+      + 'text-align:center;padding:24px;gap:14px;">'
+      + '<div style="font-weight:800;font-size:17px;">No se pudo cargar la app</div>'
+      + '<p style="color:#a3a3ac;font-size:13.5px;max-width:300px;margin:0;">'
+      + 'Falló un componente que se descarga de internet. Revisa tu conexión '
+      + 'y vuelve a intentar. Si estás en el wifi del club y sigue igual, '
+      + 'prueba con tus datos.</p>'
+      + '<button onclick="location.reload()" style="margin-top:4px;padding:12px 22px;'
+      + 'border-radius:999px;border:0;background:#00f2ea;color:#06181a;'
+      + 'font-weight:800;font-size:14.5px;font-family:inherit;">Volver a intentar</button>'
+      + '</div>';
+  }
 </script>
 <script type="module" src="assets/js/app.js"></script>
 </body>

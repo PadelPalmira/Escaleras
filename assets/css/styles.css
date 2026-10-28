@@ -738,3 +738,59 @@ hr.sep{ border: none; border-top: 1px solid var(--border); margin: var(--sp-5) 0
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------- Pareja: dos recuadros en el mismo renglón (2.6) ----------
+   Antes una pareja se dibujaba con los dos avatares encimados y un texto
+   "Nombre + Nombre", y se leía como un registro con una nota al lado. Ahora
+   cada jugador tiene su propio recuadro, los dos juntos dentro de un marco
+   compartido: se ven como una pareja, que es lo que son.
+   Van dentro de .list-row, así que heredan .rank y el recorte circular de
+   las fotos que ya existía. */
+.pareja-cajas{
+  display: flex; flex: 1 1 auto; min-width: 0;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface-2); overflow: hidden;
+}
+.pareja-caja{
+  flex: 1 1 0; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 9px;
+}
+.pareja-caja + .pareja-caja{ border-left: 1px solid var(--border); }
+.list-row .pareja-caja .avatar{ width: 30px; height: 30px; font-size: 11px; }
+.pareja-caja .pc-nombre{ min-width: 0; }
+/* El nombre se parte en DOS renglones en vez de recortarse: en un teléfono
+   de 360px cada recuadro deja ~100px de texto, y con puntos suspensivos se
+   quedaba en "Víctor Loz…" — que es justo lo que el jugador viene a leer.
+   A partir del tercer renglón sí se recorta, para que un nombre larguísimo
+   no estire la fila. */
+.pareja-caja .pc-nombre .n{
+  font-size: 12.8px; font-weight: 700; line-height: 1.25;
+  overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pareja-caja .pc-nombre .m{
+  font-size: 10.5px; line-height: 1.25; color: var(--text-tertiary); margin-top: 2px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pareja-caja.pc-pendiente{ background: var(--warning-dim); }
+.pareja-caja.pc-pendiente .pc-nombre .m{ color: var(--warning); }
+.pareja-caja.pc-vacio .pc-nombre .n{ color: var(--text-tertiary); font-weight: 600; }
+@media (max-width: 370px){
+  .pareja-caja{ padding: 6px 7px; gap: 6px; }
+  .list-row .pareja-caja .avatar{ width: 26px; height: 26px; font-size: 10px; }
+  .pareja-caja .pc-nombre .n{ font-size: 12px; }
+}
+
+/* ---------- Foco visible por teclado (2.6) ----------
+   No había ningún estilo de :focus-visible en toda la hoja: quien navega
+   con teclado no veía dónde estaba parado. Solo :focus-visible (no :focus)
+   para que no salga el anillo al tocar con el dedo. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible{
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+.nav-item:focus-visible{ outline-offset: -3px; }

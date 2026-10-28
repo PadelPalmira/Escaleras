@@ -1,10 +1,10 @@
 import { el, formatFecha, formatFechaHora, avatarContent, toast, humanizeError, confirmSheet, ahora } from '../utils.js';
 import { icon } from '../icons.js';
 import {
-  getMyProfile, getMiSituacionCategorias, tiersElegibles, getEventoLiguillaActivo,
+  getMyProfile, getMiSituacionCategorias, getEventoLiguillaActivo,
   getMiCalificacionLiguilla, getCalificadosConfirmados, getParejasLiguilla, getMiParejaLiguilla,
   getPickActualDraft, getPartidosLiguilla, responderCalificacionLiguilla, hacerPickDraft, responderPickDraft,
-  autoprogramarLiguillaMes, getEventoLiguillaDelMes, getLiguillaTablaVivo, getMiCarreraLiguilla,
+  autoprogramarLiguillaMes, getEventoLiguillaDelMes, getMiCarreraLiguilla,
   getCampeonesHistoricos, getAjusteNum, getLiguillaEventStartTs,
 } from '../api.js';
 import { generarTarjetaLiguilla, compartirTarjeta } from '../vendor/sharecard.js';
@@ -41,7 +41,21 @@ export async function renderLiguilla() {
   const profile = await getMyProfile();
   if (!profile) return el('div', { class: 'empty-state' }, 'No se pudo cargar tu perfil.');
   const situacion = await getMiSituacionCategorias(profile.id);
-  const tiers = tiersElegibles(situacion ? situacion.porCategoria : {});
+  const porCategoria = (situacion && situacion.porCategoria) || {};
+
+  // 2.6 — Antes aqui se usaba tiersElegibles(), que solo da true si YA vas
+  // dentro del top 12 y no eres provisional. Consecuencia: la tabla que
+  // sirve justamente para saber CUANTO TE FALTA solo se le mostraba a quien
+  // ya no la necesitaba. Al 28 oct 2026 eso eran 8 de 149 jugadores activos;
+  // los otros 141 abrian la pestana y encontraban un callejon sin salida.
+  // Ahora basta con tener ranking en la categoria, y quien todavia no tiene
+  // ninguno ve la carrera igual (fecha y tabla) con una linea que le dice
+  // como entrar en ella.
+  const tiers = [];
+  if (porCategoria.A) tiers.push('liguilla_a');
+  if (porCategoria.B) tiers.push('ascenso_b');
+  const sinRankingTodavia = tiers.length === 0;
+  const tiersAMostrar = sinRankingTodavia ? ['liguilla_a', 'ascenso_b'] : tiers;
 
   const wrap = el('div');
   const header = el('div', { class: 'row-between mb-2' }, [
@@ -50,15 +64,11 @@ export async function renderLiguilla() {
   ]);
   wrap.appendChild(header);
 
-  if (tiers.length === 0) {
-    wrap.appendChild(el('div', { class: 'empty-state' }, [
-      el('div', { class: 'emoji' }, '🏆'),
-      el('p', {}, 'Todavía no calificas a ninguna Liguilla. Se abre a los mejores del ranking en vivo de cada categoría — A y B por separado — y se recalcula con cada noche que juegas.'),
-    ]));
-    // Los Campeones Históricos son de todo el club, no de quien calificó
-    // este mes — se muestran aquí igual, aunque el jugador no esté adentro.
-    wrap.appendChild(await renderCampeonesHistoricos());
-    return wrap;
+  if (sinRankingTodavia) {
+    wrap.appendChild(el('div', { class: 'aviso aviso-info mb-3' },
+      'Todavía no apareces en ninguna carrera porque no has jugado una noche. '
+      + 'Califican los 12 mejores del ranking de cada categoría; en cuanto juegues, '
+      + 'aquí abajo te vas a ver con tus puntos y cuántos te faltan.'));
   }
 
   async function refresh(oldWrap) {
@@ -69,14 +79,14 @@ export async function renderLiguilla() {
   // Un jugador puede calificar a la Liguilla de A y a la de B el mismo mes
   // si juega bien en las dos — son categorías independientes. Si califica a
   // ambas, se le da un selector para no amontonar todo en una sola pantalla.
-  let tierActivo = tiers[0];
+  let tierActivo = tiersAMostrar[0];
   const tabsWrap = el('div', { class: 'tabs mb-3' });
   const bodyWrap = el('div');
 
   function pintarTabs() {
     tabsWrap.innerHTML = '';
-    if (tiers.length < 2) return;
-    tiers.forEach((t) => {
+    if (tiersAMostrar.length < 2) return;
+    tiersAMostrar.forEach((t) => {
       tabsWrap.appendChild(el('button', {
         class: `tab-chip ${tierActivo === t ? 'active' : ''}`,
         onclick: async () => { tierActivo = t; pintarTabs(); await pintarCuerpo(); },
@@ -320,35 +330,63 @@ async function renderCarreraDelMes(tier, eventoMes, profile, onChange) {
     console.error('No se pudo calcular tu carrera de Liguilla:', err);
   }
 
-  // Tabla en vivo.
+  // Tabla en vivo. Import dinámico con guarda: getLiguillaCarreraTabla es
+  // nueva de este deployment. Si el navegador todavía trae el api.js viejo
+  // en caché NO se cae a la función anterior — esa ordena por promedio pero
+  // enseña el acumulado y marca "calificado" sin revisar el mínimo de
+  // noches, o sea que mostraría números que se contradicen con la tarjeta
+  // de arriba. Mejor no enseñar tabla un rato que enseñarla mal.
   try {
-    const tabla = await getLiguillaTablaVivo(tier, 20);
+    const apiMod = await import('../api.js');
+    if (typeof apiMod.getLiguillaCarreraTabla !== 'function') {
+      wrap.appendChild(el('p', { class: 'text-tiny mt-3', style: 'color:var(--text-tertiary);' },
+        'La tabla de la carrera se está actualizando. Cierra la app y vuelve a abrirla.'));
+      return wrap;
+    }
+    const tabla = await apiMod.getLiguillaCarreraTabla(tier, 25);
     if (tabla.length) {
       wrap.appendChild(el('div', { class: 'section-title' }, 'Cómo va la carrera ahorita'));
       const list = el('div', { class: 'card' });
+      // La línea de corte va donde se acaban los 12 que califican, o sea
+      // antes del primer jugador que YA ES ELEGIBLE pero quedó fuera del
+      // top. Un jugador al que todavía le faltan noches no la dispara:
+      // puede ir en el lugar 1 por promedio y aun así no contar, y poner la
+      // línea arriba de él la dejaba hasta el principio de la tabla
+      // diciéndole a todos que están fuera.
       let corteDibujado = false;
       tabla.forEach((r, i) => {
-        if (!r.calificado && !corteDibujado) {
+        if (r.elegible !== false && !r.calificado && !corteDibujado) {
           corteDibujado = true;
           list.appendChild(el('div', { class: 'corte-liguilla' }, 'Línea de corte — de aquí para abajo, fuera'));
         } else if (i > 0) {
           list.appendChild(el('hr', { class: 'sep', style: 'margin:9px 0;' }));
         }
         const soyYo = r.player_id === profile.id;
+        // El número grande es el PROMEDIO por noche, que es con lo que de
+        // verdad se ordena y se decide — el mismo que la tarjeta de arriba.
         list.appendChild(
           el('div', { class: `row-between${soyYo ? ' text-cyan' : ''}`, style: soyYo ? 'font-weight:800;' : '' }, [
-            el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
+            el('div', { class: 'row gap-2', style: 'align-items:center;min-width:0;' }, [
               el('span', { class: 'rank-num' }, String(r.rnk)),
               el('span', { class: 'avatar-mini' }, avatarContent(r)),
-              el('span', {}, r.full_name || 'Jugador'),
+              el('div', { style: 'min-width:0;' }, [
+                el('div', {}, r.full_name || 'Jugador'),
+                r.elegible === false
+                  ? el('div', { class: 'text-tiny', style: 'color:var(--text-tertiary);' },
+                      r.noches_faltantes > 0
+                        ? `le falta${r.noches_faltantes === 1 ? '' : 'n'} ${r.noches_faltantes} noche${r.noches_faltantes === 1 ? '' : 's'}`
+                        : 'todavía no elegible')
+                  : null,
+              ]),
             ]),
-            el('span', { style: 'font-variant-numeric:tabular-nums;' }, Number(r.rolling_points || 0).toFixed(0)),
+            el('span', { style: 'font-variant-numeric:tabular-nums;' }, Number(r.promedio || 0).toFixed(0)),
           ])
         );
       });
       wrap.appendChild(list);
       wrap.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' },
-        'Se calcula en vivo con tus últimas escaleras. Cada noche que se juega, la tabla se mueve.'));
+        'El número es tu promedio de puntos por noche, que es con lo que se ordena. '
+        + 'Se calcula en vivo con tus últimas escaleras: cada noche que se juega, la tabla se mueve.'));
     }
   } catch (err) {
     console.error('No se pudo cargar la tabla de la carrera:', err);

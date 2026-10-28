@@ -251,6 +251,23 @@ function mostrarNuevaPassword() {
 
 async function boot() {
   appEl = document.getElementById('app');
+
+  // El service worker se registra siempre, antes de saber si hay sesion:
+  // sin el, Android no ofrece "Instalar app" ni en la pantalla de login, y
+  // en iPhone el push no existe. No cachea nada (ver sw.js), asi que no
+  // puede dejar servido un modulo viejo.
+  try {
+    const push = await import('./push.js');
+    await push.registrarServiceWorker();
+    push.escucharRotacionDeSuscripcion();
+    // Si ya habia permiso y suscripcion, se reenvia el endpoint por si el
+    // navegador lo roto mientras la app estaba cerrada.
+    push.sincronizarPushAlArrancar();
+  } catch (err) {
+    // Que falle el push no puede impedir entrar a la app.
+    console.error('No se pudo iniciar el servicio de avisos:', err);
+  }
+
   const recuperando = esEnlaceDeRecuperacion();
   const { data } = await supabase.auth.getSession();
   if (recuperando && data.session) {
