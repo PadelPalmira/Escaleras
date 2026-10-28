@@ -6,7 +6,7 @@ import {
   cerrarConfirmacionesLiguilla, autogenerarParejasRestantes, cancelarLiguillaSinJugadores,
   generarRonda1Liguilla, registrarResultadoLiguillaMatch, sustituirCalificadoLiguilla, buscarJugadores,
   getParejasLiguilla, getPartidosLiguilla, getPickActualDraft, responderPickDraft,
-  reprogramarEventoLiguilla,
+  reprogramarEventoLiguilla, responderCalificacionLiguilla,
 } from '../api.js';
 
 const TIER_LABEL = { liguilla_a: 'Liguilla · Categoría A', ascenso_b: 'Liguilla Categoría B' };
@@ -134,7 +134,7 @@ async function cargarDetalle(wrap, eventId) {
 
   const AUTO_TXT = {
     scheduled: 'La app genera los calificados sola en cuanto se cierra la última noche de esta categoría antes de la Liguilla, y les avisa a todos. No tienes que hacer nada.',
-    qualifying: 'La app ya invitó a los 12. Tu trabajo: que confirmen en su app. Al corte de 24 h la app cierra sola las confirmaciones, pasa los lugares a la lista de espera y, con 12 confirmados, arranca el draft. Si no se juntan 12, busca sustitutos aquí o ciérrala.',
+    qualifying: 'La app ya invitó a los 12. Tu trabajo: que confirmen. Pueden hacerlo hasta 3 h antes del evento, el mismo día; si alguien no puede entrar a la app, confírmalo tú con el botón de su renglón. A esa hora la app cierra sola, pasa los lugares a la lista de espera y, con 12 confirmados, arranca el draft. Si no se juntan 12, busca sustitutos aquí o ciérrala.',
     draft_open: 'La app lleva los turnos sola: quien no elige en su plazo se salta, y si al final quedan jugadores sin pareja, se emparejan solos. A 2 horas del evento se completan las parejas que falten.',
     confirmed: 'Parejas listas. El cuadro (Ronda 1) se publica solo 3 horas antes del evento; los resultados los capturas tú esa noche.',
     in_progress: 'Captura los resultados conforme se juegan: la app arma sola la Ronda 2, la Final y el resultado final.',
@@ -180,16 +180,43 @@ async function cargarDetalle(wrap, eventId) {
       ]);
       list.appendChild(row);
       if (['invited', 'confirmed'].includes(c.status)) {
-        list.appendChild(el('button', {
-          class: 'btn btn-secondary btn-sm mt-2', style: 'width:auto;',
+        const acciones = el('div', { class: 'row gap-2 mt-2', style: 'flex-wrap:wrap;' });
+        // Confirmar en su nombre: para el jugador que avisa por WhatsApp
+        // que sí va pero no entra a la app. Queda registrado igual que si
+        // lo hubiera hecho él.
+        if (c.status === 'invited') {
+          acciones.appendChild(el('button', {
+            class: 'btn btn-primary btn-sm', style: 'width:auto;',
+            onclick: async (e) => {
+              const nombre = (c.profiles && c.profiles.full_name) || 'este jugador';
+              const ok = await confirmSheet({
+                title: `¿Confirmar el lugar de ${nombre}?`,
+                body: 'Úsalo solo si te confirmó por fuera (WhatsApp, en el club). '
+                  + 'Queda apartado igual que si lo hubiera hecho él desde su app.',
+                confirmLabel: 'Sí, confirmar su lugar',
+              });
+              if (!ok) return;
+              e.target.disabled = true;
+              try {
+                await responderCalificacionLiguilla(c.id, true);
+                toast(`${nombre} queda confirmado.`, 'success');
+                refresh();
+              } catch (err) { toast(humanizeError(err), 'error'); e.target.disabled = false; }
+            },
+          }, 'Confirmar por él'));
+        }
+        acciones.appendChild(el('button', {
+          class: 'btn btn-secondary btn-sm', style: 'width:auto;',
           onclick: () => abrirSustituirCalificado(c, refresh),
         }, 'Sustituir'));
+        list.appendChild(acciones);
       }
     });
     wrap.appendChild(list);
 
     wrap.appendChild(el('div', { class: 'card mt-4' }, [
-      el('p', { class: 'text-muted mb-3' }, 'Esto lo hace la app sola al corte de 24 h. Úsalo solo si quieres adelantar el cierre.'),
+      el('p', { class: 'text-muted mb-3' }, 'Las confirmaciones quedan abiertas hasta 3 h antes del evento, el mismo día. '
+        + 'La app cierra sola a esa hora. Úsalo solo si quieres adelantar el cierre.'),
       el('div', { class: 'btn-row' }, [
         el('button', { class: 'btn btn-secondary', onclick: (e) => cerrarConf(eventId, false, refresh, e.target) }, 'Cerrar confirmaciones'),
         el('button', { class: 'btn btn-secondary', onclick: (e) => cerrarConf(eventId, true, refresh, e.target) }, 'Forzar cierre ahora'),
@@ -237,11 +264,18 @@ async function cargarDetalle(wrap, eventId) {
       });
       wrap.appendChild(list);
     }
-    wrap.appendChild(el('div', { class: 'card mt-4' }, [
-      el('p', { class: 'text-muted mb-3' }, 'La app lo hace sola 2 h antes del evento. Si quieres adelantarlo, empareja ya a los jugadores que falten, por nivel.'),
-      el('div', { class: 'btn-row' }, [
-        el('button', { class: 'btn btn-secondary', onclick: (e) => autogenerar(eventId, false, refresh, e.target) }, 'Autogenerar restantes'),
-        el('button', { class: 'btn btn-secondary', onclick: (e) => autogenerar(eventId, true, refresh, e.target) }, 'Forzar ahora'),
+    // 28 oct 2026: la app YA NO arma las parejas sola. Es decision de
+    // recepcion, y si nadie la toma la edicion se cancela sola al pasar su
+    // hora. Por eso esto dejo de ser un atajo y es el camino normal.
+    wrap.appendChild(el('div', { class: 'card mt-4', style: 'border-color:var(--warning);' }, [
+      el('div', { style: 'font-weight:800;font-size:15px;' }, 'Acabar el draft'),
+      el('p', { class: 'text-tiny mt-2' },
+        'La app ya NO arma las parejas sola. Cuando ya no quieras esperar más picks, '
+        + 'aprieta aquí: se empareja por nivel a quien falte y queda listo el cuadro. '
+        + 'Si nadie lo aprieta, esta Liguilla no se arma y se cancela sola al pasar su hora.'),
+      el('div', { class: 'btn-row mt-3' }, [
+        el('button', { class: 'btn btn-primary', onclick: (e) => autogenerar(eventId, true, refresh, e.target) },
+          'Acabar el draft automáticamente'),
       ]),
     ]));
     wrap.appendChild(renderCancelarSinJugadores(eventId, refresh));
