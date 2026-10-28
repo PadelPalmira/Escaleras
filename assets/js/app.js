@@ -37,6 +37,9 @@ const NAV_ITEM_ADMIN = { path: '/admin', label: 'Admin', icon: icon.shield };
 
 let appEl, headerEl, viewEl, navEl;
 let perfilActual = null;
+// Solo una pantalla de bienvenida por entrada: si ya le pedimos algo
+// (perfil, guía, contraseña), lo de los avisos espera a la próxima vez.
+let yaLePedimosAlgo = false;
 
 function buildShell(navItems) {
   appEl = document.getElementById('app');
@@ -171,6 +174,7 @@ async function showApp() {
   );
   if (perfilAMedias) {
     appEl.innerHTML = '';
+    yaLePedimosAlgo = true;
     appEl.appendChild(renderCompletarPerfil(profile, (updatedProfile, recomendacion) => {
       // Justo después de completar el perfil, un jugador nuevo ve la guía
       // rápida de la app (con su recomendación de nivel ya integrada) antes
@@ -187,6 +191,7 @@ async function showApp() {
   // de cancha 1) sin tener que descubrirlo jugando.
   if (profile && !profile.app_guide_seen_at) {
     appEl.innerHTML = '';
+    yaLePedimosAlgo = true;
     appEl.appendChild(renderGuiaApp({ profile, recomendacion: null, esNuevo: false, onDone: () => showApp() }));
     return;
   }
@@ -197,8 +202,26 @@ async function showApp() {
   // y es justo el correo lo que no les llega.
   if (profile && !profile.password_set_at && !yaLePreguntamosPorPassword()) {
     appEl.innerHTML = '';
+    yaLePedimosAlgo = true;
     appEl.appendChild(renderPonerPassword({ profile, onDone: () => showApp() }));
     return;
+  }
+
+  // Los avisos al celular, ofrecidos UNA vez. Va al final de los gates a
+  // propósito: es lo único que no bloquea nada, así que si ya le pedimos
+  // otra cosa en esta misma entrada, se deja para la siguiente.
+  if (!yaLePedimosAlgo) {
+    try {
+      const av = await import('./views/activar_avisos.js');
+      if (await av.convieneOfrecerAvisos()) {
+        appEl.innerHTML = '';
+        appEl.appendChild(av.renderActivarAvisos({ profile, onDone: () => showApp() }));
+        return;
+      }
+    } catch (err) {
+      // Archivo nuevo de este deployment: si todavía no está, la app entra igual.
+      console.error('No se pudo ofrecer los avisos:', err);
+    }
   }
 
   perfilActual = profile;

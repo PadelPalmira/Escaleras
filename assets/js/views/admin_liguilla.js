@@ -1,5 +1,6 @@
 import { el, formatFecha, formatFechaHora, toast, humanizeError, openSheet, confirmSheet, todayISO, avatarContent, chipJugador } from '../utils.js';
 import { icon } from '../icons.js';
+import { APP_URL } from '../config.js';
 import {
   getMyProfile, esAdminOMaestro,
   getLiguillaEventosAdmin, crearEventoLiguilla, generarCalificadosLiguilla, getCalificadosLiguillaAdmin,
@@ -222,6 +223,7 @@ async function cargarDetalle(wrap, eventId) {
         el('button', { class: 'btn btn-secondary', onclick: (e) => cerrarConf(eventId, true, refresh, e.target) }, 'Forzar cierre ahora'),
       ]),
     ]));
+    wrap.appendChild(renderDifusion(ev, calificados));
     wrap.appendChild(renderCancelarSinJugadores(eventId, refresh));
     return;
   }
@@ -337,6 +339,86 @@ function renderReprogramarFecha(ev, onChange) {
     errBox,
   ]);
 }
+
+/* ============================================================
+   Difusión: las dos herramientas que de verdad mueven la aguja
+   cuando faltan confirmaciones (28 oct 2026: 0 de 12 confirmados
+   a un día del evento, con los avisos de la app leídos al ~10%).
+   El canal que sí llega es WhatsApp, así que la app le arma a
+   recepción el mensaje y la imagen en vez de que los escriba.
+   ============================================================ */
+function renderDifusion(ev, calificados) {
+  const dentro = (calificados || []).filter((c) => ['invited', 'confirmed'].includes(c.status));
+  const faltan = dentro.filter((c) => c.status === 'invited');
+  const espera = (calificados || []).filter((c) => c.status === 'waitlist');
+  const nombre = (c) => (c.profiles && c.profiles.full_name) || 'Jugador';
+  const cuando = ev.event_date ? formatFecha(ev.event_date) : 'la fecha por definir';
+  const titulo = TIER_LABEL[ev.tier] || 'Liguilla';
+
+  const card = el('div', { class: 'card mt-4' });
+  card.appendChild(el('div', { style: 'font-weight:800;font-size:15px;' }, 'Avisar por fuera de la app'));
+  card.appendChild(el('p', { class: 'text-tiny mt-2' },
+    faltan.length
+      ? `Faltan ${faltan.length} por confirmar. Los avisos de la app casi no se leen: mándalo al grupo.`
+      : 'Ya confirmaron todos. Puedes presumir la lista de todos modos.'));
+
+  const fila = el('div', { class: 'row gap-2 mt-3', style: 'flex-wrap:wrap;' });
+
+  // 1) Mensaje listo para pegar en el grupo.
+  fila.appendChild(el('button', {
+    class: 'btn btn-primary btn-sm', style: 'width:auto;',
+    onclick: () => {
+      const lista = faltan.length
+        ? faltan.map((c) => '• ' + nombre(c)).join('\n')
+        : '';
+      const texto = faltan.length
+        ? `🏆 ${titulo} — ${cuando}\n\nFaltan por confirmar su lugar:\n${lista}\n\n`
+          + `Confirmen en la app, en la pestaña Liguilla. Si no confirman, el lugar pasa al siguiente de la fila.\n${APP_URL}`
+        : `🏆 ${titulo} — ${cuando}\n\nYa están confirmados los ${dentro.length}. ¡Nos vemos en la cancha!\n${APP_URL}`;
+      window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank', 'noopener');
+    },
+  }, faltan.length ? `Jalar por WhatsApp (${faltan.length})` : 'Mandar al grupo'));
+
+  // 2) Imagen para el grupo y para Instagram.
+  //    Import dinámico con guarda: generarTarjetaCalificados es nueva de
+  //    este deployment y admin_liguilla.js lo carga app.js de forma
+  //    estática — si sharecard.js viniera viejo de caché, un import
+  //    estático tumbaría el arranque entero de la app.
+  fila.appendChild(el('button', {
+    class: 'btn btn-secondary btn-sm', style: 'width:auto;',
+    onclick: async (e) => {
+      const previo = e.target.textContent;
+      e.target.disabled = true; e.target.textContent = 'Armando…';
+      try {
+        const sc = await import('../vendor/sharecard.js');
+        if (typeof sc.generarTarjetaCalificados !== 'function') {
+          throw new Error('Cierra la app y vuelve a abrirla para usar esto.');
+        }
+        const canvas = await sc.generarTarjetaCalificados({
+          tierLabel: titulo,
+          eventDateLabel: cuando,
+          calificados: dentro.map((c) => ({
+            seed: c.seed, full_name: nombre(c), confirmado: c.status === 'confirmed',
+          })),
+          enEspera: espera.map((c) => ({ seed: c.seed, full_name: nombre(c) })),
+        });
+        await sc.compartirTarjeta(canvas, {
+          archivo: 'calificados-liguilla.png',
+          titulo: `${titulo} — calificados`,
+          texto: `${titulo} · ${cuando}`,
+        });
+      } catch (err) { toast(humanizeError(err), 'error'); }
+      e.target.disabled = false; e.target.textContent = previo;
+    },
+  }, 'Imagen para compartir'));
+
+  card.appendChild(fila);
+  card.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' },
+    'La imagen sale en vertical (9:16): sirve igual para el grupo de WhatsApp, '
+    + 'para un estado y para Instagram.'));
+  return card;
+}
+
 
 function renderCancelarSinJugadores(eventId, onChange) {
   const card = el('div', { class: 'card mt-4' }, [

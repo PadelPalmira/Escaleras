@@ -473,6 +473,80 @@ export async function generarTarjetaResultadoJugador({
    comprobarlo con canShare, no solo con "share" in navigator) se cae a
    una descarga normal de PNG, que nunca falla.
    ============================================================ */
+/* ============================================================
+   5) Los calificados del mes — para que recepción la mande a los
+      grupos de WhatsApp y a Instagram. Sirve para dos cosas a la
+      vez: presumir quién entró y empujar a que confirmen, que es
+      donde se atora la Liguilla (al 28 oct 2026 iban 0 de 12
+      confirmados a un día del evento).
+   ============================================================ */
+export async function generarTarjetaCalificados({ tierLabel, eventDateLabel, calificados, enEspera = [] }) {
+  const { canvas, ctx } = crearLienzo();
+  await fondoYEncabezado(ctx, {
+    titulo: 'Calificados',
+    subtitulo: tierLabel,
+  });
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = COLOR.cyan;
+  ctx.font = '700 36px ' + FUENTE;
+  ctx.fillText(eventDateLabel || '', ANCHO / 2, 585);
+
+  const cardX = 80;
+  const cardW = ANCHO - 160;
+  let y = 640;
+
+  // El alto de fila se calcula para que SIEMPRE quepan todos arriba del
+  // pie, sin importar si son 12 o 17 (misma lección que la tarjeta de
+  // Ranking, donde la fila 8 se salía del lienzo).
+  const totalFilas = calificados.length + (enEspera.length ? enEspera.length + 1.6 : 0);
+  const espacio = (ALTO - 150) - y;
+  const hueco = 10;
+  const alturaFila = Math.max(54, Math.min(104, Math.floor(espacio / Math.max(totalFilas, 1)) - hueco));
+
+  const fila = (texto, numero, confirmado, atenuado) => {
+    ctx.save();
+    redondeado(ctx, cardX, y, cardW, alturaFila, 20);
+    ctx.fillStyle = atenuado ? COLOR.bg : COLOR.surface;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = confirmado ? 'rgba(52,211,153,0.45)' : COLOR.border;
+    ctx.stroke();
+    ctx.restore();
+
+    const r = Math.min(38, Math.floor(alturaFila / 2) - 6);
+    dibujarCirculoIniciales(ctx, cardX + 70, y + alturaFila / 2, r, String(numero), Math.floor(r * 0.8));
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = atenuado ? COLOR.textSecondary : COLOR.textPrimary;
+    ctx.font = `800 ${Math.floor(alturaFila * 0.33)}px ` + FUENTE;
+    ctx.fillText(acortar(ctx, texto, cardW - 300), cardX + 135, y + alturaFila / 2 + alturaFila * 0.12);
+
+    if (confirmado) {
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#34d399';
+      ctx.font = `700 ${Math.floor(alturaFila * 0.28)}px ` + FUENTE;
+      ctx.fillText('confirmado', cardX + cardW - 34, y + alturaFila / 2 + alturaFila * 0.1);
+    }
+    y += alturaFila + hueco;
+  };
+
+  calificados.forEach((c, i) => fila(c.full_name || 'Jugador', c.seed || i + 1, !!c.confirmado, false));
+
+  if (enEspera.length) {
+    ctx.textAlign = 'left';
+    ctx.fillStyle = COLOR.textTertiary;
+    ctx.font = '700 26px ' + FUENTE;
+    y += 14;   // aire: pegada al 12 se leía como una fila más
+    ctx.fillText('EN LA FILA', cardX + 6, y + 26);
+    y += 44;
+    enEspera.forEach((c, i) => fila(c.full_name || 'Jugador', c.seed || i + 1, false, true));
+  }
+
+  dibujarPie(ctx);
+  return canvas;
+}
+
 export async function compartirTarjeta(canvas, { archivo, titulo, texto }) {
   const blob = await new Promise((resolve, reject) => {
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('No se pudo generar la imagen.'))), 'image/png');

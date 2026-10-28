@@ -1,16 +1,18 @@
 import { el, todayISO, formatFecha, formatFechaHora, formatHora, avatarContent, toast, humanizeError } from '../utils.js';
 import { icon } from '../icons.js';
 import {
-  getMyProfile, getMiSituacionCategorias, getMisRegistros, tiersElegibles,
+  getMyProfile, getMiSituacionCategorias, getMisRegistros,
   getEventoLiguillaActivo, getMiCalificacionLiguilla,
   esAdminOMaestro, esMaestro, getEscalerasAdmin, getConteosRegistros,
   getMiRondaActual, horaServidor,
   getNotificacionesUrgentes, marcarNotificacionLeida,
   getMisConvocatorias, getMiCarreraLiguilla, getParejasPorConfirmar,
+  responderCalificacionLiguilla,
   getLiguillaEventosAdmin, getCalificadosLiguillaAdmin, getParejasLiguilla, getLiguillaEventStartTs,
   getAlertasRecepcion,
 } from '../api.js';
 import { navigate } from '../router.js';
+import { CLUB_TZ } from '../config.js';
 import { abrirNoche } from './admin_escaleras.js';
 
 const CAT_LABEL = { A: 'Categoría A', B: 'Categoría B' };
@@ -79,6 +81,11 @@ async function renderInicioJugador(profile) {
     } catch { /* si falla, se omite el matiz en vez de inventarlo */ }
   }
 
+  // 2.6/2.9 — Mi lugar en la Liguilla NO vive en escalera_registrations:
+  // se juega por la lista de calificados. Por eso el Inicio no se enteraba
+  // y el dia de la Liguilla los 12 que SI juegan leian "Hoy no juegas".
+  const miLiguilla = await cargarMiLiguilla(profile);
+
   const hoy = todayISO();
   const registroHoy = registros.find((r) => r.escaleras && r.escaleras.session_date === hoy && ['confirmed', 'substitute', 'waitlist'].includes(r.status));
   // Solo compromisos vigentes: un registro del que ya te diste de baja, que
@@ -138,9 +145,33 @@ async function renderInicioJugador(profile) {
     });
   }
 
+  // Confirmar el lugar de la Liguilla, en la PRIMERA pantalla. Antes esto
+  // solo vivia en la pestana Liguilla y habia que entrar a buscarlo: el 28
+  // oct, a un dia del evento, iban 0 de 12 confirmados.
+  if (miLiguilla && miLiguilla.porConfirmar) {
+    wrap.appendChild(renderConfirmarLiguilla(miLiguilla));
+  }
+
   // Tarjeta "hoy juegas"
   if (miRonda) {
     // Ya se está jugando: la tarjeta de arriba lo dice todo.
+  } else if (miLiguilla && miLiguilla.esHoy) {
+    const ev = miLiguilla.evento;
+    wrap.appendChild(
+      el('div', { class: 'card card-hero mt-4', style: 'border-color:var(--oro);' }, [
+        el('div', { class: 'row-between' }, [
+          el('div', { class: 'h2' }, [
+            el('span', { html: icon.trophy, style: 'width:19px;height:19px;vertical-align:-3px;margin-right:7px;color:var(--oro);' }),
+            'Hoy juegas la Liguilla',
+          ]),
+          el('span', { class: `badge ${miLiguilla.confirmado ? 'badge-success' : 'badge-warning'}` },
+            miLiguilla.confirmado ? 'Confirmado' : 'Falta confirmar'),
+        ]),
+        el('p', { class: 'text-muted mt-2' }, TIER_NOMBRE[ev.tier] || 'Liguilla'),
+        miLiguilla.horaTexto ? el('p', { class: 'text-muted' }, miLiguilla.horaTexto) : null,
+        el('button', { class: 'btn btn-secondary mt-4', onclick: () => navigate('/liguilla') }, 'Ver la Liguilla'),
+      ])
+    );
   } else if (registroHoy) {
     const esc = registroHoy.escaleras;
     const ws = esc.weekday_schedule;
@@ -254,30 +285,107 @@ async function renderInicioJugador(profile) {
   // movimientos pendientes. Como ahora se puede calificar a los dos el
   // mismo mes (buen nivel en A y en B a la vez), se revisa cada tier por
   // separado en vez de quedarse con uno solo.
-  try {
-    const tiers = tiersElegibles(porCategoria);
-    for (const tier of tiers) {
-      const evento = await getEventoLiguillaActivo([tier]);
-      if (!evento || ['completed', 'cancelled_no_players', 'cancelled'].includes(evento.status)) continue;
-      const miCalificacion = await getMiCalificacionLiguilla(evento.id, profile.id);
-      if (!miCalificacion) continue;
-      const titulo = tier === 'liguilla_a' ? 'Liguilla' : 'Liguilla Categoría B';
-      wrap.appendChild(
-        el('div', { class: 'card mt-4', style: 'border-color:var(--cyan);', onclick: () => navigate('/liguilla') }, [
-          el('div', { class: 'row-between' }, [
-            el('div', { style: 'font-weight:700;' }, [el('span', { html: icon.trophy, style: 'width:16px;height:16px;vertical-align:-3px;margin-right:6px;color:var(--cyan);' }), titulo]),
-            el('span', { html: icon.chevronRight, style: 'width:18px;height:18px;color:var(--text-tertiary);' }),
+  // El acceso a la Liguilla ya no se decide con tiersElegibles (que solo es
+  // true si vas en el top 12 del ranking y no eres provisional): basta con
+  // tener lugar en la lista del mes. Si no, un calificado con 2 noches no
+  // veia nada aqui aunque estuviera invitado.
+  if (miLiguilla && !miLiguilla.esHoy && !miLiguilla.porConfirmar) {
+    const titulo = TIER_NOMBRE[miLiguilla.evento.tier] || 'Liguilla';
+    wrap.appendChild(
+      el('div', { class: 'card mt-4', style: 'border-color:var(--cyan);', onclick: () => navigate('/liguilla') }, [
+        el('div', { class: 'row-between' }, [
+          el('div', { style: 'font-weight:700;' }, [
+            el('span', { html: icon.trophy, style: 'width:16px;height:16px;vertical-align:-3px;margin-right:6px;color:var(--cyan);' }),
+            titulo,
           ]),
-          el('p', { class: 'text-tiny mt-2' }, 'Tienes movimientos pendientes — toca para ver.'),
-        ])
-      );
-    }
-  } catch (err) {
-    // El banner de Liguilla nunca debe tumbar el Inicio si algo falla.
-    console.error('Error cargando banner de Liguilla:', err);
+          el('span', { html: icon.chevronRight, style: 'width:18px;height:18px;color:var(--text-tertiary);' }),
+        ]),
+        el('p', { class: 'text-tiny mt-2' },
+          miLiguilla.fechaTexto ? `Juegas el ${miLiguilla.fechaTexto}. Toca para ver el cuadro.`
+                                : 'Toca para ver cómo va.'),
+      ])
+    );
   }
 
   return wrap;
+}
+
+const TIER_NOMBRE = { liguilla_a: 'Liguilla · Categoría A', ascenso_b: 'Liguilla Categoría B' };
+
+/* Mi lugar en la Liguilla del mes, si lo tengo.
+   Se revisan los DOS tiers porque se puede calificar a los dos el mismo
+   mes. Lo que manda es tener fila en la lista de calificados, no ir en el
+   top del ranking: un jugador con 2 noches es elegible para la Liguilla
+   pero "provisional" en el Ranking, y antes eso lo dejaba sin ver nada. */
+async function cargarMiLiguilla(profile) {
+  if (!profile) return null;
+  for (const tier of ['liguilla_a', 'ascenso_b']) {
+    try {
+      const evento = await getEventoLiguillaActivo([tier]);
+      if (!evento || ['completed', 'cancelled_no_players', 'cancelled'].includes(evento.status)) continue;
+      const cal = await getMiCalificacionLiguilla(evento.id, profile.id);
+      if (!cal || !['invited', 'confirmed'].includes(cal.status)) continue;
+
+      let horaTexto = null;
+      try {
+        const ts = await getLiguillaEventStartTs(evento.id);
+        // En la zona del CLUB, no en la del teléfono: toTimeString() da la
+        // hora local del navegador y a un jugador fuera de Cuernavaca le
+        // enseñaría una hora que no es la de su partido.
+        if (ts) {
+          horaTexto = new Date(ts).toLocaleTimeString('es-MX', {
+            timeZone: CLUB_TZ, hour: 'numeric', minute: '2-digit', hour12: true,
+          });
+        }
+      } catch { /* la hora es un extra */ }
+
+      return {
+        evento,
+        calificacion: cal,
+        confirmado: cal.status === 'confirmed',
+        porConfirmar: cal.status === 'invited',
+        esHoy: evento.event_date === todayISO(),
+        fechaTexto: evento.event_date ? formatFecha(evento.event_date) : null,
+        horaTexto,
+      };
+    } catch (err) {
+      console.error('No se pudo leer tu situación de Liguilla:', err);
+    }
+  }
+  return null;
+}
+
+/* "Confirma tu lugar", con el botón que de verdad confirma — sin mandarlo
+   a otra pantalla a buscarlo. */
+function renderConfirmarLiguilla(info) {
+  const titulo = TIER_NOMBRE[info.evento.tier] || 'Liguilla';
+  const card = el('div', { class: 'card mt-3', style: 'border:1.5px solid var(--oro);' });
+  card.appendChild(el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
+    el('span', { html: icon.trophy, style: 'width:19px;height:19px;color:var(--oro);' }),
+    el('div', { style: 'font-weight:800;font-size:15px;color:var(--oro);' }, '¡Calificaste a la Liguilla!'),
+  ]));
+  card.appendChild(el('p', { class: 'text-tiny mt-2' },
+    `${titulo}${info.fechaTexto ? ' · ' + info.fechaTexto : ''}${info.horaTexto ? ' · ' + info.horaTexto : ''}`));
+  card.appendChild(el('p', { class: 'text-tiny mt-1' },
+    'Falta que confirmes tu lugar. Si no confirmas, pasa al siguiente de la fila.'));
+
+  const btn = el('button', { class: 'btn btn-primary mt-3' }, 'Confirmar mi lugar');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Confirmando…';
+    try {
+      await responderCalificacionLiguilla(info.calificacion.id, true);
+      toast('¡Listo! Tu lugar quedó apartado.', 'success');
+      navigate('/liguilla');
+    } catch (err) {
+      toast(humanizeError(err), 'error');
+      btn.disabled = false; btn.textContent = 'Confirmar mi lugar';
+    }
+  });
+  card.appendChild(btn);
+  card.appendChild(el('button', {
+    class: 'btn btn-ghost btn-sm mt-2', onclick: () => navigate('/liguilla'),
+  }, 'Ver los detalles primero'));
+  return card;
 }
 
 /* Cuanto te falta para la Liguilla, debajo de tus numeros del ranking.
