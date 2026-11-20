@@ -15,7 +15,7 @@
    y borrando el cache viejo en 'activate' — nunca con un cache-first a secas.
    ========================================================================== */
 
-const VERSION = '2.6.0';
+const VERSION = '3.0.0';
 
 self.addEventListener('install', (event) => {
   // Entra en vigor de inmediato: un SW viejo esperando no sirve de nada

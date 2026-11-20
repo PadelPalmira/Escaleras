@@ -670,8 +670,8 @@ textarea.input{ height: auto; padding: var(--sp-3) var(--sp-4); resize: vertical
 .row-between{ display: flex; align-items: center; justify-content: space-between; }
 .stack{ display: flex; flex-direction: column; }
 .gap-1{ gap: var(--sp-1); } .gap-2{ gap: var(--sp-2); } .gap-3{ gap: var(--sp-3); } .gap-4{ gap: var(--sp-4); }
-.mt-2{ margin-top: var(--sp-2); } .mt-3{ margin-top: var(--sp-3); } .mt-4{ margin-top: var(--sp-4); } .mt-6{ margin-top: var(--sp-6); }
-.mb-2{ margin-bottom: var(--sp-2); } .mb-3{ margin-bottom: var(--sp-3); } .mb-4{ margin-bottom: var(--sp-4); }
+.mt-1{ margin-top: var(--sp-1); } .mt-2{ margin-top: var(--sp-2); } .mt-3{ margin-top: var(--sp-3); } .mt-4{ margin-top: var(--sp-4); } .mt-6{ margin-top: var(--sp-6); }
+.mb-1{ margin-bottom: var(--sp-1); } .mb-2{ margin-bottom: var(--sp-2); } .mb-3{ margin-bottom: var(--sp-3); } .mb-4{ margin-bottom: var(--sp-4); }
 .grid-2{ display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
 .grid-3{ display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); }
 .stat-tile{
@@ -794,3 +794,125 @@ hr.sep{ border: none; border-top: 1px solid var(--border); margin: var(--sp-5) 0
   border-radius: var(--r-sm);
 }
 .nav-item:focus-visible{ outline-offset: -3px; }
+
+/* ==========================================================================
+   3.0 — Vidrio sutil, resplandor y entradas
+   --------------------------------------------------------------------------
+   El "liquid glass" es desenfocar LO QUE HAY DETRÁS. Sobre el negro plano de
+   la app no habría nada que desenfocar y el efecto sería invisible, así que
+   primero se pone un resplandor muy tenue de la paleta del club detrás del
+   contenido, y encima van dos o tres paneles de vidrio. Nada más: el club
+   lo pidió "que se note muy sutilmente".
+   ========================================================================== */
+
+/* El resplandor vive detrás de TODO y no estorba a los toques. */
+.resplandor-marca{
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(42rem 28rem at 18% -6%,  rgba(0,242,234,0.13), transparent 60%),
+    radial-gradient(38rem 26rem at 92% 10%,  rgba(255,0,193,0.11), transparent 62%),
+    radial-gradient(34rem 24rem at 50% 108%, rgba(0,242,234,0.07), transparent 60%);
+  animation: resplandor-vivo 24s ease-in-out infinite alternate;
+}
+@keyframes resplandor-vivo{
+  from{ transform: translate3d(0,0,0) scale(1); }
+  to  { transform: translate3d(0,-1.5%,0) scale(1.06); }
+}
+
+/* El panel de vidrio. Se usa SOLO en dos o tres lugares (el hero del mes y
+   la carrera), nunca en toda la pantalla: si todo es vidrio, nada lo es. */
+.panel-vidrio{
+  position: relative;
+  background: rgba(26,26,30,0.58);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: var(--r-lg);
+  box-shadow: 0 10px 34px rgba(0,0,0,0.38);
+  overflow: hidden;
+}
+/* El brillo del borde superior, que es lo que de verdad lo hace leer como
+   vidrio y no como una tarjeta translúcida cualquiera. */
+.panel-vidrio::before{
+  content: ''; position: absolute; inset: 0 0 auto 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.30), transparent);
+}
+/* El desenfoque va aparte y SOLO donde el navegador lo soporta: si no, el
+   panel se queda sólido y se ve perfectamente bien. */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)){
+  .panel-vidrio{
+    background: rgba(26,26,30,0.42);
+    -webkit-backdrop-filter: blur(18px) saturate(1.5);
+    backdrop-filter: blur(18px) saturate(1.5);
+  }
+}
+
+/* Entradas escalonadas: las tarjetas del tablero aparecen una tras otra. */
+.entra{ animation: entra-suave 460ms var(--ease) both; }
+.entra-1{ animation-delay: 40ms; }
+.entra-2{ animation-delay: 90ms; }
+.entra-3{ animation-delay: 140ms; }
+.entra-4{ animation-delay: 190ms; }
+.entra-5{ animation-delay: 240ms; }
+.entra-6{ animation-delay: 290ms; }
+@keyframes entra-suave{
+  from{ opacity: 0; transform: translate3d(0, 14px, 0) scale(0.985); }
+  to  { opacity: 1; transform: none; }
+}
+
+/* El número grande del mes. */
+.numerazo{
+  font-size: 54px; font-weight: 800; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  background: var(--gradient-brand); -webkit-background-clip: text;
+  background-clip: text; color: transparent;
+}
+
+/* Barra de progreso de las noches para el premio. */
+.barra-premio{
+  height: 10px; border-radius: var(--r-pill);
+  background: var(--surface-2); overflow: hidden; border: 1px solid var(--border);
+}
+.barra-premio > i{
+  display: block; height: 100%; border-radius: var(--r-pill);
+  background: var(--gradient-brand);
+  width: 0; animation: barra-llena 900ms var(--ease) 260ms both;
+}
+@keyframes barra-llena{ from{ width: 0; } }
+
+/* Gráfica de barras de "Tus puntos", dibujada con divs. */
+.barras-puntos{ display: flex; align-items: flex-end; gap: 7px; height: 92px; }
+.barras-puntos > div{ flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 5px; min-width: 0; }
+.barras-puntos .barra{
+  border-radius: 7px 7px 3px 3px; background: var(--gradient-brand);
+  transform-origin: bottom; animation: barra-sube 520ms var(--ease) both;
+}
+.barras-puntos .barra.tenue{ background: var(--surface-2); border: 1px solid var(--border); }
+.barras-puntos .pie{ font-size: 9.5px; color: var(--text-tertiary); text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes barra-sube{ from{ transform: scaleY(0); opacity: 0; } }
+
+/* Renglón de rival: marcador ganados-perdidos. */
+.marcador-rival{
+  font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14px;
+  white-space: nowrap;
+}
+.marcador-rival .g{ color: var(--success); }
+.marcador-rival .p{ color: var(--danger); }
+.marcador-rival .sep{ color: var(--text-tertiary); margin: 0 2px; }
+
+/* Chip de "te faltan N noches". */
+.chip-faltan{
+  display: inline-block; padding: 3px 10px; border-radius: var(--r-pill);
+  font-size: 11px; font-weight: 800;
+  background: var(--warning-dim); color: var(--warning);
+}
+.chip-listo{ background: var(--success-dim); color: var(--success); }
+
+/* Quien pide menos movimiento no recibe nada de esto: ni entradas, ni
+   resplandor que se mueva, ni barras que crezcan. */
+@media (prefers-reduced-motion: reduce){
+  .entra, .barra-premio > i, .barras-puntos .barra{ animation: none !important; }
+  .barra-premio > i{ width: var(--ancho-final, 0); }
+  .resplandor-marca{ animation: none; }
+  /* El desenfoque también cuesta batería en teléfonos modestos. */
+  .panel-vidrio{ -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(26,26,30,0.92); }
+}

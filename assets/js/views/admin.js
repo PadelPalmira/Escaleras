@@ -48,11 +48,30 @@ export async function renderAdmin() {
     iconoSvg: icon.racket,
     path: '/admin/escaleras',
   }));
+  // La Liguilla está apagada, no borrada: si se vuelve a prender en
+  // Configuración, esta tarjeta reaparece sola. Se pregunta con guarda
+  // porque liguillaActiva() es nueva de este deployment y el navegador
+  // puede traer esta pantalla con el api.js viejo todavía en caché.
+  let ligActiva = false;
+  try {
+    const mod = await import('../api.js');
+    if (typeof mod.liguillaActiva === 'function') ligActiva = await mod.liguillaActiva();
+  } catch { ligActiva = false; }
+
+  if (ligActiva) {
+    wrap.appendChild(menuCard({
+      titulo: 'Liguilla del mes',
+      descripcion: 'Calificados, draft y el cuadro del torneo.',
+      iconoSvg: icon.trophy,
+      path: '/admin/liguilla',
+    }));
+  }
+
   wrap.appendChild(menuCard({
-    titulo: 'Liguilla del mes',
-    descripcion: 'Calificados, draft y el cuadro del torneo.',
-    iconoSvg: icon.trophy,
-    path: '/admin/liguilla',
+    titulo: 'Playeras de campeón',
+    descripcion: 'Cuántas hay por talla, a quién le toca una y registrar cada entrega.',
+    iconoSvg: icon.playera,
+    path: '/admin/playeras',
   }));
   wrap.appendChild(menuCard({
     titulo: 'Cashbacks cobrados',

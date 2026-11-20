@@ -1290,6 +1290,15 @@ export async function ponerPassword(password) {
 
 /* Tabla de la noche: posiciones, puntos, partidos y cashbacks. Funciona
    mientras se juega (en vivo, ronda a ronda) y cuando ya cerró. */
+/* Por qué quedó uno arriba del otro cuando empataron en puntos esa noche.
+   Sale de la MISMA tabla_noche, no de un cálculo aparte: así la razón que
+   se le enseña al jugador no puede contradecir el orden que ve. */
+export async function getMotivosDesempateNoche(escaleraId) {
+  const { data, error } = await supabase.rpc('motivos_desempate_noche', { p_escalera_id: escaleraId });
+  if (error) throw error;
+  return data || [];
+}
+
 export async function getTablaNoche(escaleraId) {
   const { data, error } = await supabase.rpc('tabla_noche', { p_escalera_id: escaleraId });
   if (error) throw error;
@@ -1512,4 +1521,119 @@ export async function pushDePrueba() {
   const { data, error } = await supabase.rpc('push_de_prueba');
   if (error) throw error;
   return data;
+}
+
+/* =====================================================================
+   Deployment 3.0 — La liga: puntos del mes, del año y de siempre
+   ---------------------------------------------------------------------
+   Todas leen de UNA sola base en la base de datos (puntos_base), así
+   que la tabla del mes, la del año y la histórica no se pueden
+   contradecir entre ellas. Es la lección que dejó la Liguilla: cuando
+   dos pantallas calculan lo mismo por su cuenta, acaban peleadas.
+   ===================================================================== */
+
+/* La tabla del mes trae además las reglas del premio: si cada quien es
+   elegible, cuántas noches le faltan, y por qué quedó arriba o abajo
+   cuando hubo empate. */
+export async function getTablaMes(categoria, monthKey = null) {
+  const { data, error } = await supabase.rpc('tabla_mes', {
+    p_category: categoria, p_month_key: monthKey,
+  });
+  if (error) throw error;
+  return data || [];
+}
+
+/* Año e histórico: informativas, sin reglas de premio. */
+export async function getTablaPeriodo(categoria, periodo = 'anio', anio = null) {
+  const { data, error } = await supabase.rpc('tabla_periodo', {
+    p_category: categoria, p_periodo: periodo, p_anio: anio,
+  });
+  if (error) throw error;
+  return data || [];
+}
+
+/* Todo el tablero del jugador en UNA llamada. */
+export async function getMiTablero(playerId = null) {
+  const { data, error } = await supabase.rpc('mi_tablero', { p_player_id: playerId });
+  if (error) throw error;
+  return data;
+}
+
+export async function getMisPuntosPorNoche(playerId = null, limite = 8) {
+  const { data, error } = await supabase.rpc('mis_puntos_por_noche', {
+    p_player_id: playerId, p_limite: limite,
+  });
+  if (error) throw error;
+  return data || [];
+}
+
+/* Cara a cara. OJO al redactarlo en pantalla: el pádel es 2 contra 2,
+   así que "le ganaste" es "tu pareja le ganó a la pareja donde iba él". */
+export async function getMisRivales(playerId = null, desde = null, hasta = null) {
+  const { data, error } = await supabase.rpc('enfrentamientos', {
+    p_player_id: playerId, p_desde: desde, p_hasta: hasta,
+  });
+  if (error) throw error;
+  return data || [];
+}
+
+/* ---------- Playeras de campeón ---------- */
+export async function getMisPremios(playerId = null) {
+  const { data, error } = await supabase.rpc('mis_premios', { p_player_id: playerId });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function elegirTallaPlayera(recognitionId, talla) {
+  const { data, error } = await supabase.rpc('elegir_talla_playera', {
+    p_recognition_id: recognitionId, p_talla: talla,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function getPlayerasResumen() {
+  const { data, error } = await supabase.rpc('playeras_resumen');
+  if (error) throw error;
+  return data;
+}
+
+export async function getPremiosAdmin(soloPendientes = false) {
+  const { data, error } = await supabase.rpc('premios_admin', { p_solo_pendientes: soloPendientes });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function ajustarStockPlayera(talla, cantidad) {
+  const { error } = await supabase.rpc('ajustar_stock_playera', { p_talla: talla, p_cantidad: cantidad });
+  if (error) throw error;
+}
+
+export async function registrarEntregaPlayera(recognitionId, talla) {
+  const { data, error } = await supabase.rpc('registrar_entrega_playera', {
+    p_recognition_id: recognitionId, p_talla: talla,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/* ¿La Liguilla está prendida? Con esto se esconde (o se vuelve a mostrar)
+   su pestaña y todas sus puertas de entrada, sin tocar una línea de su
+   código: el día que el club la retome, se prende el ajuste y vuelve. */
+export async function liguillaActiva() {
+  try {
+    // Mismo camino que el resto de los ajustes (tabla system_settings con
+    // caché), no una RPC: el valor es booleano, así que getAjusteNum no
+    // sirve aquí — Number(false) da 0 pero Number(true) da 1 y eso se
+    // prestaba a confusión. Mejor leerlo tal cual.
+    const { data, error } = await supabase
+      .from('system_settings').select('value').eq('key', 'liguilla_activa').maybeSingle();
+    if (error) throw error;
+    if (!data) return true;   // si el ajuste no existe, se comporta como antes
+    return data.value === true || data.value === 'true';
+  } catch {
+    // Si no se puede saber, se asume APAGADA: es peor enseñar una pestaña
+    // muerta que esconder una viva.
+    return false;
+  }
 }

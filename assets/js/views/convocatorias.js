@@ -1536,10 +1536,23 @@ function renderInvitarWhatsapp(f) {
    lugar de Liguilla quieres ver cómo les está yendo a los demás. */
 async function pintarTablaNoche(box, f, { enVivo }) {
   const esParejas = f.formato === 'parejas';
-  const [filas, parejas] = await Promise.all([
+  const [filas, parejas, motivos] = await Promise.all([
     getTablaNoche(f.escalera_id),
     esParejas ? getParejasDeNoche(f.escalera_id).catch(() => []) : Promise.resolve([]),
+    // En Parejas Fijas no se pide: ahí los renglones son PAREJAS, y la
+    // explicación compara jugador contra jugador, así que nombraría a la
+    // mitad de la pareja de arriba. Se queda para individual y retas.
+    // Se pide con guarda porque es nueva de este deployment y el
+    // navegador puede traer esta pantalla con el api.js viejo en caché.
+    esParejas ? Promise.resolve([]) : (async () => {
+      try {
+        const mod = await import('../api.js');
+        if (typeof mod.getMotivosDesempateNoche !== 'function') return [];
+        return await mod.getMotivosDesempateNoche(f.escalera_id);
+      } catch { return []; }
+    })(),
   ]);
+  const porQue = new Map((motivos || []).filter((m) => m.motivo).map((m) => [m.player_id, m.motivo]));
   box.innerHTML = '';
   if (!filas.length) {
     box.appendChild(el('p', { class: 'text-muted' }, 'Todavía no hay resultados capturados.'));
@@ -1574,7 +1587,18 @@ async function pintarTablaNoche(box, f, { enVivo }) {
       'Se actualiza cada vez que recepción captura un marcador. Los puntos del bono de cierre se suman al final.'));
   }
 
-  filas.forEach((r) => box.appendChild(filaTablaNoche(r, r.lugar, false)));
+  filas.forEach((r) => {
+    box.appendChild(filaTablaNoche(r, r.lugar, false));
+    // Empatar en puntos y no saber por qué el otro quedó arriba es la
+    // duda que más llega a recepción. Aquí ya viene contestada.
+    const motivo = porQue.get(r.player_id);
+    if (motivo) {
+      box.appendChild(el('div', {
+        class: 'text-tiny',
+        style: 'color:var(--text-tertiary);padding:0 0 10px 68px;margin-top:-6px;',
+      }, motivo));
+    }
+  });
 }
 
 function filaTablaNoche(r, lugar, esPareja) {

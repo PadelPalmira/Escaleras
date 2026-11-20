@@ -225,7 +225,18 @@ async function showApp() {
   }
 
   perfilActual = profile;
-  const navItems = esAdminOMaestro(profile) ? [...NAV_ITEMS_BASE, NAV_ITEM_ADMIN] : NAV_ITEMS_BASE;
+
+  // 3.0 — La Liguilla está apagada por decisión del club. No se borró
+  // nada: su pestaña, su ruta y sus avisos desaparecen mientras el ajuste
+  // liguilla_activa esté en false, y vuelven TODOS el día que se prenda.
+  let ligActiva = false;
+  try {
+    const mod = await import('./api.js');
+    if (typeof mod.liguillaActiva === 'function') ligActiva = await mod.liguillaActiva();
+  } catch { ligActiva = false; }
+
+  const base = ligActiva ? NAV_ITEMS_BASE : NAV_ITEMS_BASE.filter((i) => i.path !== '/liguilla');
+  const navItems = esAdminOMaestro(profile) ? [...base, NAV_ITEM_ADMIN] : base;
 
   buildShell(navItems);
   registerRoute('/inicio', renderHome);
@@ -234,19 +245,27 @@ async function showApp() {
   registerRoute('/convocatoria', renderConvocatoriaDetalle);
   registerRoute('/reglas', renderReglas);
   registerRoute('/perfil', renderPerfil);
-  registerRoute('/liguilla', renderLiguilla);
+  if (ligActiva) registerRoute('/liguilla', renderLiguilla);
   registerRoute('/admin', renderAdmin);
   registerRoute('/admin/escaleras', renderAdminEscaleras);
   registerRoute('/admin/liguilla', renderAdminLiguilla);
   registerRoute('/admin/jugadores', renderAdminJugadores);
   registerRoute('/admin/escanear-cashback', renderAdminEscanearCashback);
   registerRoute('/admin/cashbacks', renderAdminCashbacks);
+  // Pantalla nueva, cargada en el momento. Si se importara arriba y
+  // GitHub Pages todavía no hubiera publicado el archivo, un import
+  // estático que da 404 impide que ARRANQUE toda la app; así, lo peor
+  // que pasa es que esta pantalla tarde un instante o avise del error.
+  registerRoute('/admin/playeras', async () => {
+    const mod = await import('./views/admin_playeras.js');
+    return mod.renderAdminPlayeras();
+  });
   registerRoute('/maestro', renderMaestro);
   initRouter(viewEl, {
     onNavigateCb: (path) => { updateActiveNav(path); refrescarAvisos(profile); refrescarBrilloLiguilla(); },
   });
   refrescarAvisos(profile);
-  refrescarBrilloLiguilla({ forzar: true });
+  if (ligActiva) refrescarBrilloLiguilla({ forzar: true });
 }
 
 /* El enlace de "olvide mi contrasena" abre la app con la sesion en modo

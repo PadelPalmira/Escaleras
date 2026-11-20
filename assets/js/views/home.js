@@ -1,12 +1,12 @@
 import { el, todayISO, formatFecha, formatFechaHora, formatHora, avatarContent, toast, humanizeError } from '../utils.js';
 import { icon } from '../icons.js';
 import {
-  getMyProfile, getMiSituacionCategorias, getMisRegistros,
+  getMyProfile, getMisRegistros,
   getEventoLiguillaActivo, getMiCalificacionLiguilla,
   esAdminOMaestro, esMaestro, getEscalerasAdmin, getConteosRegistros,
   getMiRondaActual, horaServidor,
   getNotificacionesUrgentes, marcarNotificacionLeida,
-  getMisConvocatorias, getMiCarreraLiguilla, getParejasPorConfirmar,
+  getMisConvocatorias, getParejasPorConfirmar,
   responderCalificacionLiguilla,
   getLiguillaEventosAdmin, getCalificadosLiguillaAdmin, getParejasLiguilla, getLiguillaEventStartTs,
   getAlertasRecepcion,
@@ -37,40 +37,38 @@ export async function renderHome() {
   return renderInicioJugador(profile);
 }
 
+/* ============================================================
+   3.0 — El tablero del jugador
+   ------------------------------------------------------------
+   Orden pedido por el club: la próxima jugada arriba en
+   compacto, luego el mes, la carrera por el campeonato, las
+   estadísticas, los rivales, los puntos, y hasta abajo el
+   detalle de la próxima jugada.
+
+   Para los 99 de 166 jugadores que nunca han jugado una noche,
+   esto no puede ser un museo de ceros: se les enseña una
+   invitación a jugar y ya.
+   ============================================================ */
 async function renderInicioJugador(profile) {
   const registros = await getMisRegistros({ soloFuturas: true });
-  const situacion = profile ? await getMiSituacionCategorias(profile.id) : null;
-  const porCategoria = situacion ? situacion.porCategoria : {};
-  const categoriasConDatos = ['A', 'B'].filter((c) => porCategoria[c]);
-  // Si la noche está en juego ahorita, esto es lo único que le importa al
-  // jugador: en qué cancha le toca y con quién.
+
+  // Si la noche está en juego ahorita, eso es lo único que importa.
   let miRonda = null;
   try { miRonda = await getMiRondaActual(); } catch { miRonda = null; }
-  // La cuenta regresiva se mide contra el reloj del SERVIDOR: el del telefono
-  // de cada jugador puede estar mal puesto y el numero se veria absurdo.
   let desfaseMs = 0;
   if (miRonda && miRonda.cronometro_inicio) {
     try { desfaseMs = Date.now() - (await horaServidor()).getTime(); } catch { desfaseMs = 0; }
   }
-  // Avisos que no se puede permitir no ver. Viven en Perfil, pero ahi casi
-  // nadie entra: "se abrio un lugar y es tuyo" enterado tarde se convierte en
-  // un no-show con penalizacion.
+
   let urgentes = [];
   try { urgentes = profile ? await getNotificacionesUrgentes(profile.id, 3) : []; } catch { urgentes = []; }
 
-  // 2.6 — La convocatoria abierta que esta MAS CERCA de jugarse, sin filtrar
-  // por nivel: mis_convocatorias ya devuelve A y B para todos (el nivel solo
-  // marca cual es la "recomendada"). Antes el Inicio no sugeria ninguna y el
-  // jugador tenia que entrar a buscarla; con 44 noches programadas y 7
-  // jugadas en 60 dias, el problema no era que no quisieran — era que nadie
-  // veia a tiempo que faltaba gente.
   let convocatorias = [];
   try { convocatorias = await getMisConvocatorias(9); } catch { convocatorias = []; }
 
-  // Las parejas que apartaron pero NO han aceptado no vienen en
-  // mis_convocatorias: hay que pedirlas aparte. Sin esto la tarjeta diria
-  // "van 2 de 6" contando una pareja que puede caerse sola — que es
-  // exactamente la mentira del 8 de octubre ("6 de 6" cuando no eran 6).
+  // Las parejas que apartaron y NO han aceptado no vienen en
+  // mis_convocatorias: sin pedirlas aparte, la tarjeta diría "van 2 de 6"
+  // contando una pareja que puede caerse sola — la mentira del 8 de octubre.
   const nocheSugerida = sugerenciaConvocatoria(convocatorias);
   if (nocheSugerida && nocheSugerida.formato === 'parejas') {
     try {
@@ -81,32 +79,47 @@ async function renderInicioJugador(profile) {
     } catch { /* si falla, se omite el matiz en vez de inventarlo */ }
   }
 
-  // 2.6/2.9 — Mi lugar en la Liguilla NO vive en escalera_registrations:
-  // se juega por la lista de calificados. Por eso el Inicio no se enteraba
-  // y el dia de la Liguilla los 12 que SI juegan leian "Hoy no juegas".
-  const miLiguilla = await cargarMiLiguilla(profile);
+  // Todo el tablero en una sola llamada (antes el Inicio hacía seis idas
+  // y vueltas y en señal mala se notaba).
+  let tablero = null; let premios = [];
+  try {
+    const mod = await import('../api.js');
+    if (typeof mod.getMiTablero === 'function') tablero = await mod.getMiTablero();
+    if (typeof mod.getMisPremios === 'function') premios = await mod.getMisPremios();
+  } catch (err) {
+    console.error('No se pudo cargar tu tablero:', err);
+  }
+
+  // La Liguilla está apagada, pero su código sigue entero: si el club la
+  // vuelve a prender, todo esto reaparece solo.
+  let ligActiva = false;
+  try {
+    const mod = await import('../api.js');
+    if (typeof mod.liguillaActiva === 'function') ligActiva = await mod.liguillaActiva();
+  } catch { ligActiva = false; }
+  const miLiguilla = ligActiva ? await cargarMiLiguilla(profile) : null;
 
   const hoy = todayISO();
-  const registroHoy = registros.find((r) => r.escaleras && r.escaleras.session_date === hoy && ['confirmed', 'substitute', 'waitlist'].includes(r.status));
-  // Solo compromisos vigentes: un registro del que ya te diste de baja, que
-  // declinaste, o que ya no está activo no es una "próxima sesión" — dejarlo
-  // aquí lo hace ver como un pendiente real cuando ya no lo es, y hasta puede
-  // sacar de la lista (por el tope de 5) a una sesión que sí sigue en pie.
+  const registroHoy = registros.find((r) => r.escaleras && r.escaleras.session_date === hoy
+    && ['confirmed', 'substitute', 'waitlist'].includes(r.status));
   const proximosRegistros = registros
     .filter((r) => r.escaleras && r.escaleras.session_date >= hoy
       && ['confirmed', 'substitute', 'waitlist'].includes(r.status))
     .sort((a, b) => a.escaleras.session_date.localeCompare(b.escaleras.session_date));
 
   const wrap = el('div');
+  wrap.appendChild(el('div', { class: 'resplandor-marca' }));
+  let paso = 0;
+  const entra = (nodo) => { paso += 1; if (nodo) nodo.classList.add('entra', `entra-${Math.min(paso, 6)}`); return nodo; };
 
-  // Saludo
+  /* ---------- Saludo ---------- */
   const nombre = (profile && profile.full_name) ? profile.full_name.split(' ')[0] : 'Jugador';
   wrap.appendChild(el('div', { class: 'row-between mb-2' }, [
     el('div', { class: 'h1' }, `Hola, ${nombre}`),
     el('div', { class: 'avatar-btn', style: 'width:44px;height:44px;font-size:15px;' }, avatarContent(profile)),
   ]));
 
-  // Entró con la contraseña que le dio recepción: que la cambie por una suya.
+  /* ---------- Cosas que no pueden esperar ---------- */
   if (profile && profile.password_provisional) {
     wrap.appendChild(el('div', { class: 'card mb-3', style: 'border:1.5px solid var(--warning);' }, [
       el('div', { style: 'font-weight:800;color:var(--warning);' }, 'Cambia tu contraseña'),
@@ -118,10 +131,13 @@ async function renderInicioJugador(profile) {
     ]));
   }
 
-  // Tarjeta de la ronda en curso — manda sobre todo lo demás.
-  if (miRonda) {
-    wrap.appendChild(renderMiRonda(miRonda, desfaseMs));
-  }
+  if (miRonda) wrap.appendChild(renderMiRonda(miRonda, desfaseMs));
+
+  // ¿Ganó una playera y no ha elegido talla? Eso va antes que todo.
+  const premioPendiente = (premios || []).find((p) => !p.entregada && !p.talla_elegida);
+  if (premioPendiente) wrap.appendChild(entra(renderElegirTalla(premioPendiente)));
+
+  if (miLiguilla && miLiguilla.porConfirmar) wrap.appendChild(renderConfirmarLiguilla(miLiguilla));
 
   if (urgentes.length) {
     wrap.appendChild(el('div', { class: 'section-title mt-4' },
@@ -145,121 +161,65 @@ async function renderInicioJugador(profile) {
     });
   }
 
-  // Confirmar el lugar de la Liguilla, en la PRIMERA pantalla. Antes esto
-  // solo vivia en la pestana Liguilla y habia que entrar a buscarlo: el 28
-  // oct, a un dia del evento, iban 0 de 12 confirmados.
-  if (miLiguilla && miLiguilla.porConfirmar) {
-    wrap.appendChild(renderConfirmarLiguilla(miLiguilla));
-  }
-
-  // Tarjeta "hoy juegas"
+  /* ---------- Hoy ---------- */
   if (miRonda) {
     // Ya se está jugando: la tarjeta de arriba lo dice todo.
   } else if (miLiguilla && miLiguilla.esHoy) {
-    const ev = miLiguilla.evento;
-    wrap.appendChild(
-      el('div', { class: 'card card-hero mt-4', style: 'border-color:var(--oro);' }, [
-        el('div', { class: 'row-between' }, [
-          el('div', { class: 'h2' }, [
-            el('span', { html: icon.trophy, style: 'width:19px;height:19px;vertical-align:-3px;margin-right:7px;color:var(--oro);' }),
-            'Hoy juegas la Liguilla',
-          ]),
-          el('span', { class: `badge ${miLiguilla.confirmado ? 'badge-success' : 'badge-warning'}` },
-            miLiguilla.confirmado ? 'Confirmado' : 'Falta confirmar'),
-        ]),
-        el('p', { class: 'text-muted mt-2' }, TIER_NOMBRE[ev.tier] || 'Liguilla'),
-        miLiguilla.horaTexto ? el('p', { class: 'text-muted' }, miLiguilla.horaTexto) : null,
-        el('button', { class: 'btn btn-secondary mt-4', onclick: () => navigate('/liguilla') }, 'Ver la Liguilla'),
-      ])
-    );
+    wrap.appendChild(renderHoyLiguilla(miLiguilla));
   } else if (registroHoy) {
     const esc = registroHoy.escaleras;
     const ws = esc.weekday_schedule;
-    wrap.appendChild(
+    wrap.appendChild(entra(
       el('div', { class: 'card card-hero mt-4' }, [
         el('div', { class: 'row-between' }, [
           el('div', { class: 'h2' }, 'Hoy juegas 🎾'),
-          el('span', { class: `badge ${STATUS_LABEL[registroHoy.status]?.cls || 'badge-neutral'}` }, STATUS_LABEL[registroHoy.status]?.text || registroHoy.status),
+          el('span', { class: `badge ${STATUS_LABEL[registroHoy.status]?.cls || 'badge-neutral'}` },
+            STATUS_LABEL[registroHoy.status]?.text || registroHoy.status),
         ]),
-        el('p', { class: 'text-muted mt-2' }, `${ws.format === 'individual' ? 'Individual' : ws.format === 'parejas' ? 'Parejas Fijas' : 'Retas Abiertas'} · Categoría ${ws.category || '—'}`),
+        el('p', { class: 'text-muted mt-2' },
+          `${FORMATO_LARGO[ws.format] || ws.format} · Categoría ${ws.category || '—'}`),
         el('p', { class: 'text-muted' }, `${formatHora(ws.start_time)} – ${formatHora(ws.end_time)}`),
         el('button', { class: 'btn btn-secondary mt-4', onclick: () => navigate('/convocatorias') }, 'Ver detalles'),
       ])
-    );
-  } else {
-    // El boton de "ver convocatorias" ya no va aqui: lo lleva la tarjeta de
-    // sugerencia de abajo, que ademas dice cual y cuanta gente falta. Si no
-    // hay ninguna abierta, esta tarjeta se queda con el boton.
-    // El boton no va aqui: lo pone siempre renderSugerenciaConvocatoria,
-    // con o sin sugerencia, para que no salgan dos botones iguales pegados.
-    const hayQueSugerir = !!nocheSugerida;
-    wrap.appendChild(
-      el('div', { class: 'card mt-4' }, [
-        el('div', { class: 'h2' }, 'Hoy no juegas'),
-        el('p', { class: 'text-muted mt-2' }, hayQueSugerir
-          ? 'Esto es lo que sigue esta semana.'
-          : 'Ahorita no hay ninguna convocatoria abierta. Abren el domingo.'),
-      ])
-    );
+    ));
   }
 
-  // Sugerencia + puerta a todas las convocatorias.
-  wrap.appendChild(renderSugerenciaConvocatoria(nocheSugerida));
+  /* ---------- 0. Tu próxima jugada (compacta) ---------- */
+  wrap.appendChild(entra(renderProximaCompacta(nocheSugerida, proximosRegistros)));
 
-  // Tu posición EN CADA categoría: ya no hay una sola "tu categoría" — cada
-  // quien elige dónde jugar, así que puede tener lugar en A, en B, en las
-  // dos, o en ninguna todavía.
-  wrap.appendChild(el('div', { class: 'section-title' }, 'Tu ranking'));
-  if (categoriasConDatos.length > 0) {
-    // 2.6 — Cuanto te falta para la Liguilla, al lado de tus puntos. Antes
-    // esto solo existia en la pestana de Liguilla y ahi casi nadie podia
-    // verlo (se exigia ir YA dentro del top 12). Es el dato que convierte
-    // "jugue una noche" en "me faltan 14 puntos".
-    const carreras = {};
-    await Promise.all(categoriasConDatos.map(async (cat) => {
-      const tier = cat === 'A' ? 'liguilla_a' : 'ascenso_b';
-      try { carreras[cat] = await getMiCarreraLiguilla(tier); }
-      catch { carreras[cat] = null; }
-    }));
+  const tieneDatos = tablero && tablero.tiene_datos;
 
-    categoriasConDatos.forEach((cat) => {
-      const c = porCategoria[cat];
-      const carrera = carreras[cat];
-      wrap.appendChild(
-        el('div', { class: 'card mt-2' }, [
-          el('div', { class: 'row-between' }, [
-            el('span', { class: `badge ${CAT_BADGE_CLASS[cat]}` }, CAT_LABEL[cat]),
-            c.provisional ? el('span', { class: 'badge badge-warning' }, 'Provisional') : null,
-          ]),
-          el('div', { class: 'grid-3 mt-4' }, [
-            el('div', { class: 'stat-tile' }, [
-              el('div', { class: 'stat-value' }, c.rank != null ? `#${c.rank}` : '—'),
-              el('div', { class: 'stat-label' }, 'Posición'),
-            ]),
-            // El numero grande tiene que ser EL MISMO que el del Ranking: el
-            // promedio por noche, no la suma.
-            el('div', { class: 'stat-tile' }, [
-              el('div', { class: 'stat-value' }, c.escaleras_counted > 0 ? Math.round(c.promedio) : '—'),
-              el('div', { class: 'stat-label' }, 'Prom. x noche'),
-            ]),
-            el('div', { class: 'stat-tile' }, [
-              el('div', { class: 'stat-value' }, c.escaleras_counted != null ? c.escaleras_counted : '—'),
-              el('div', { class: 'stat-label' }, 'Noches'),
-            ]),
-          ]),
-          renderFaltanteLiguilla(carrera),
-        ])
-      );
-    });
+  if (!tieneDatos) {
+    /* ---------- El tablero de quien todavía no juega ---------- */
+    wrap.appendChild(entra(el('div', { class: 'panel-vidrio mt-4', style: 'padding:26px 20px;text-align:center;' }, [
+      el('div', { style: 'font-size:34px;' }, '🎾'),
+      el('div', { class: 'h2 mt-2' }, 'Empieza a jugar para ver tus estadísticas'),
+      el('p', { class: 'text-muted mt-2' },
+        'En cuanto juegues tu primera noche, aquí vas a ver tus puntos del mes, '
+        + 'tu lugar en la tabla, contra quién ganas más y qué te falta para la playera de campeón.'),
+      el('button', { class: 'btn btn-primary mt-4', onclick: () => navigate('/convocatorias') },
+        'Ver las convocatorias'),
+    ])));
   } else {
-    wrap.appendChild(
-      el('div', { class: 'card' }, [
-        el('p', { class: 'text-muted' }, 'Todavía no tienes ranking en ninguna categoría. Se arma en cuanto empiezas a jugar en A o en B.'),
-      ])
-    );
+    /* ---------- 1. Tu mes ---------- */
+    wrap.appendChild(entra(renderTuMes(tablero)));
+    /* ---------- 2. La carrera por el campeonato ---------- */
+    const carrera = el('div');
+    wrap.appendChild(entra(carrera));
+    renderCarreraCampeonato(carrera, tablero, profile);
+    /* ---------- 3. Tus estadísticas ---------- */
+    wrap.appendChild(entra(renderTusEstadisticas(tablero)));
+    /* ---------- 4. Tus rivales ---------- */
+    const rivales = el('div');
+    wrap.appendChild(entra(rivales));
+    renderTusRivales(rivales);
+    /* ---------- 5. Tus puntos ---------- */
+    const puntos = el('div');
+    wrap.appendChild(entra(puntos));
+    renderTusPuntos(puntos);
   }
 
-  // Próximas convocatorias en las que estoy anotado
+  /* ---------- Tus próximas sesiones ---------- */
   if (proximosRegistros.length > 0) {
     wrap.appendChild(el('div', { class: 'section-title' }, 'Tus próximas sesiones'));
     const list = el('div', { class: 'card' });
@@ -272,7 +232,8 @@ async function renderInicioJugador(profile) {
         el('div', { class: 'row-between' }, [
           el('div', {}, [
             el('div', { style: 'font-weight:700;font-size:14.5px;' }, formatFecha(esc.session_date)),
-            el('div', { class: 'text-tiny' }, `${ws.format === 'individual' ? 'Individual' : ws.format === 'parejas' ? 'Parejas' : 'Retas'} · Cat ${ws.category || '—'}`),
+            el('div', { class: 'text-tiny' },
+              `${FORMATO_LARGO[ws.format] || ws.format} · Cat ${ws.category || '—'}`),
           ]),
           el('span', { class: `badge ${st.cls}` }, st.text),
         ])
@@ -281,14 +242,10 @@ async function renderInicioJugador(profile) {
     wrap.appendChild(list);
   }
 
-  // Banner de Liguilla/Ascenso — uno por cada torneo donde tengas
-  // movimientos pendientes. Como ahora se puede calificar a los dos el
-  // mismo mes (buen nivel en A y en B a la vez), se revisa cada tier por
-  // separado en vez de quedarse con uno solo.
-  // El acceso a la Liguilla ya no se decide con tiersElegibles (que solo es
-  // true si vas en el top 12 del ranking y no eres provisional): basta con
-  // tener lugar en la lista del mes. Si no, un calificado con 2 noches no
-  // veia nada aqui aunque estuviera invitado.
+  /* ---------- 6. Tu próxima jugada (detalle) ---------- */
+  wrap.appendChild(renderSugerenciaConvocatoria(nocheSugerida));
+
+  /* ---------- Liguilla, solo si el club la vuelve a prender ---------- */
   if (miLiguilla && !miLiguilla.esHoy && !miLiguilla.porConfirmar) {
     const titulo = TIER_NOMBRE[miLiguilla.evento.tier] || 'Liguilla';
     wrap.appendChild(
@@ -308,6 +265,395 @@ async function renderInicioJugador(profile) {
   }
 
   return wrap;
+}
+
+/* ---------- La tarjeta de "hoy juegas la Liguilla" (solo si está prendida) ---------- */
+function renderHoyLiguilla(miLiguilla) {
+  const ev = miLiguilla.evento;
+  return el('div', { class: 'card card-hero mt-4', style: 'border-color:var(--oro);' }, [
+    el('div', { class: 'row-between' }, [
+      el('div', { class: 'h2' }, [
+        el('span', { html: icon.trophy, style: 'width:19px;height:19px;vertical-align:-3px;margin-right:7px;color:var(--oro);' }),
+        'Hoy juegas la Liguilla',
+      ]),
+      el('span', { class: `badge ${miLiguilla.confirmado ? 'badge-success' : 'badge-warning'}` },
+        miLiguilla.confirmado ? 'Confirmado' : 'Falta confirmar'),
+    ]),
+    el('p', { class: 'text-muted mt-2' }, TIER_NOMBRE[ev.tier] || 'Liguilla'),
+    miLiguilla.horaTexto ? el('p', { class: 'text-muted' }, miLiguilla.horaTexto) : null,
+    el('button', { class: 'btn btn-secondary mt-4', onclick: () => navigate('/liguilla') }, 'Ver la Liguilla'),
+  ]);
+}
+
+/* ---------- 0. Tu próxima jugada, versión compacta ---------- */
+function renderProximaCompacta(f, proximosRegistros) {
+  // Si ya tiene lugar en algo, eso manda sobre la sugerencia.
+  const yaTengo = (proximosRegistros || [])[0];
+  if (yaTengo) {
+    const esc = yaTengo.escaleras; const ws = esc.weekday_schedule;
+    return el('button', {
+      class: 'card fila-enlace mt-3',
+      onclick: () => navigate('/convocatoria?id=' + esc.id),
+    }, [
+      el('div', { class: 'row gap-2', style: 'align-items:center;min-width:0;' }, [
+        el('span', { html: icon.calendar, style: 'width:18px;height:18px;color:var(--cyan);flex:0 0 auto;' }),
+        el('div', { style: 'min-width:0;text-align:left;' }, [
+          el('div', { class: 'text-tiny', style: 'text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:800;' },
+            'Tu próxima jugada'),
+          el('div', { style: 'font-weight:700;font-size:14px;' },
+            `${formatFecha(esc.session_date)} · ${FORMATO_LARGO[ws.format] || ws.format}`),
+        ]),
+      ]),
+      el('span', { html: icon.chevronRight, style: 'width:18px;height:18px;color:var(--text-tertiary);' }),
+    ]);
+  }
+  if (!f) {
+    return el('button', {
+      class: 'card fila-enlace mt-3', onclick: () => navigate('/convocatorias'),
+    }, [
+      el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
+        el('span', { html: icon.calendar, style: 'width:18px;height:18px;color:var(--text-tertiary);' }),
+        el('div', { style: 'text-align:left;' }, [
+          el('div', { class: 'text-tiny', style: 'text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:800;' },
+            'Tu próxima jugada'),
+          el('div', { style: 'font-weight:700;font-size:14px;' }, 'Ahorita no hay nada abierto'),
+        ]),
+      ]),
+      el('span', { html: icon.chevronRight, style: 'width:18px;height:18px;color:var(--text-tertiary);' }),
+    ]);
+  }
+  const esParejas = f.formato === 'parejas';
+  const esRetas = f.formato === 'retas_abiertas';
+  let falta = '';
+  if (!esRetas) {
+    const cap = f.capacidad || 12;
+    const total = esParejas ? Math.floor(cap / 2) : cap;
+    const van = esParejas ? Math.floor((f.ocupados || 0) / 2) : (f.ocupados || 0);
+    const n = Math.max(total - van, 0);
+    falta = n > 0
+      ? ` · ${esParejas ? (n === 1 ? 'falta 1 pareja' : `faltan ${n} parejas`)
+                        : (n === 1 ? 'falta 1 jugador' : `faltan ${n} jugadores`)}`
+      : ' · está completa';
+  }
+  return el('button', {
+    class: 'card fila-enlace mt-3', style: 'border-color:var(--cyan);',
+    onclick: () => navigate('/convocatoria?id=' + f.escalera_id),
+  }, [
+    el('div', { class: 'row gap-2', style: 'align-items:center;min-width:0;' }, [
+      el('span', { html: icon.calendar, style: 'width:18px;height:18px;color:var(--cyan);flex:0 0 auto;' }),
+      el('div', { style: 'min-width:0;text-align:left;' }, [
+        el('div', { class: 'text-tiny', style: 'text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:800;' },
+          'Tu próxima jugada'),
+        el('div', { style: 'font-weight:700;font-size:14px;' },
+          `${FORMATO_LARGO[f.formato] || f.formato} · ${formatFecha(f.session_date)}${falta}`),
+      ]),
+    ]),
+    el('span', { html: icon.chevronRight, style: 'width:18px;height:18px;color:var(--text-tertiary);' }),
+  ]);
+}
+
+/* ---------- 1. Tu mes ---------- */
+function renderTuMes(tablero) {
+  const cats = Object.keys(tablero.categorias || {});
+  const wrap = el('div', { class: 'mt-4' });
+  wrap.appendChild(el('div', { class: 'section-title', style: 'margin-top:0;' }, 'Tu mes'));
+
+  if (!cats.length) {
+    wrap.appendChild(el('div', { class: 'card' },
+      el('p', { class: 'text-muted' }, 'Este mes todavía no juegas ninguna noche.')));
+    return wrap;
+  }
+
+  cats.forEach((cat) => {
+    const c = tablero.categorias[cat];
+    const panel = el('div', { class: 'panel-vidrio mt-2', style: 'padding:18px;' });
+    panel.appendChild(el('div', { class: 'row-between' }, [
+      el('span', { class: `badge ${CAT_BADGE_CLASS[cat] || 'badge-neutral'}` }, CAT_LABEL[cat] || cat),
+      c.es_campeon
+        ? el('span', { class: 'badge badge-success' }, '🏆 Campeón del mes')
+        : el('span', { class: `badge ${c.elegible ? 'badge-success' : 'badge-warning'}` },
+            c.elegible ? 'Ya puedes ganar' : `Te faltan ${c.noches_faltantes}`),
+    ]));
+
+    panel.appendChild(el('div', { class: 'row-between mt-3', style: 'align-items:flex-end;' }, [
+      el('div', {}, [
+        el('div', { class: 'numerazo' }, Number(c.puntos).toFixed(0)),
+        el('div', { class: 'text-tiny', style: 'color:var(--text-tertiary);' }, 'puntos este mes'),
+      ]),
+      el('div', { style: 'text-align:right;' }, [
+        el('div', { style: 'font-size:26px;font-weight:800;' }, `#${c.lugar}`),
+        el('div', { class: 'text-tiny', style: 'color:var(--text-tertiary);' }, 'tu lugar'),
+      ]),
+    ]));
+
+    // La barra de noches: el mínimo tiene que verse, no sorprender.
+    const hechas = Math.min(c.noches, c.min_noches);
+    const pct = Math.round(100 * hechas / Math.max(c.min_noches, 1));
+    const barra = el('div', { class: 'barra-premio mt-4' },
+      el('i', { style: `width:${pct}%;--ancho-final:${pct}%;` }));
+    panel.appendChild(barra);
+    panel.appendChild(el('p', { class: 'text-tiny mt-2' },
+      c.elegible
+        ? `Llevas ${c.noches} noches: ya cumples el mínimo para la playera.`
+        : `Llevas ${c.noches} de ${c.min_noches} noches. Te falta${c.noches_faltantes === 1 ? '' : 'n'} ${c.noches_faltantes} para poder ganar la playera.`));
+
+    if (!c.es_campeon && c.lider_nombre) {
+      panel.appendChild(el('div', { class: 'aviso aviso-info mt-3' },
+        c.puntos_al_lider > 0
+          ? `Te faltan ${Number(c.puntos_al_lider).toFixed(0)} puntos para alcanzar a ${c.lider_nombre}.`
+          : `Vas empatado con ${c.lider_nombre} en puntos.`));
+    }
+    if (c.motivo_desempate) {
+      panel.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' },
+        c.motivo_desempate));
+    }
+    wrap.appendChild(panel);
+  });
+  return wrap;
+}
+
+/* ---------- 2. La carrera por el campeonato ---------- */
+async function renderCarreraCampeonato(host, tablero, profile) {
+  const cats = Object.keys(tablero.categorias || {});
+  if (!cats.length) return;
+  // Si juega en las dos, se abre en la que lleva más noches.
+  let cat = cats[0];
+  if (cats.length > 1) {
+    cat = tablero.categorias[cats[0]].noches >= tablero.categorias[cats[1]].noches ? cats[0] : cats[1];
+  }
+
+  const titulo = el('div', { class: 'section-title' }, 'La carrera por el campeonato');
+  const chips = el('div', { class: 'tabs mb-2' });
+  const lista = el('div', { class: 'panel-vidrio', style: 'padding:14px 16px;' });
+  host.append(titulo, cats.length > 1 ? chips : el('span'), lista);
+
+  async function pintar() {
+    chips.innerHTML = '';
+    if (cats.length > 1) {
+      cats.forEach((c) => chips.appendChild(el('button', {
+        class: `tab-chip ${cat === c ? 'active' : ''}`,
+        onclick: () => { cat = c; pintar(); },
+      }, CAT_LABEL[c] || c)));
+    }
+    lista.innerHTML = '';
+    lista.appendChild(el('div', { class: 'skeleton', style: 'height:150px;' }));
+    let filas = [];
+    try {
+      const mod = await import('../api.js');
+      if (typeof mod.getTablaMes !== 'function') { lista.innerHTML = ''; return; }
+      filas = await mod.getTablaMes(cat, tablero.mes);
+    } catch (err) {
+      lista.innerHTML = '';
+      lista.appendChild(el('p', { class: 'text-tiny' }, 'No se pudo cargar la carrera.'));
+      return;
+    }
+    lista.innerHTML = '';
+    const top = filas.slice(0, 5);
+    const yoFuera = !top.some((f) => f.player_id === (profile && profile.id));
+    const yo = filas.find((f) => f.player_id === (profile && profile.id));
+
+    top.forEach((f, i) => {
+      if (i > 0) lista.appendChild(el('hr', { class: 'sep', style: 'margin:9px 0;' }));
+      lista.appendChild(filaCarrera(f, profile));
+    });
+    if (yoFuera && yo) {
+      lista.appendChild(el('hr', { class: 'sep', style: 'margin:9px 0;' }));
+      lista.appendChild(el('div', { class: 'text-tiny', style: 'color:var(--text-tertiary);text-align:center;' }, '···'));
+      lista.appendChild(filaCarrera(yo, profile));
+    }
+    lista.appendChild(el('button', {
+      class: 'btn btn-ghost btn-sm mt-3', onclick: () => navigate('/ranking'),
+    }, 'Ver la tabla completa'));
+  }
+  await pintar();
+}
+
+function filaCarrera(f, profile) {
+  const soyYo = f.player_id === (profile && profile.id);
+  return el('div', { class: 'row-between', style: soyYo ? 'font-weight:800;' : '' }, [
+    el('div', { class: 'row gap-2', style: 'align-items:center;min-width:0;' }, [
+      el('span', { class: 'rank-num' }, f.es_campeon ? '🏆' : String(f.lugar)),
+      el('span', { class: 'avatar-mini' }, avatarContent(f)),
+      el('div', { style: 'min-width:0;' }, [
+        el('div', { style: 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' },
+          (f.full_name || 'Jugador') + (soyYo ? ' (tú)' : '')),
+        f.noches_faltantes > 0
+          ? el('div', { class: 'text-tiny', style: 'color:var(--warning);' },
+              `le falta${f.noches_faltantes === 1 ? '' : 'n'} ${f.noches_faltantes} noche${f.noches_faltantes === 1 ? '' : 's'}`)
+          : null,
+      ]),
+    ]),
+    el('span', { style: 'font-variant-numeric:tabular-nums;' }, Number(f.puntos).toFixed(0)),
+  ]);
+}
+
+/* ---------- 3. Tus estadísticas ---------- */
+function renderTusEstadisticas(tablero) {
+  const e = tablero.estadisticas || {};
+  const wrap = el('div');
+  wrap.appendChild(el('div', { class: 'section-title' }, 'Tus estadísticas'));
+  const card = el('div', { class: 'card' });
+  card.appendChild(el('div', { class: 'grid-3' }, [
+    el('div', { class: 'stat-tile' }, [
+      el('div', { class: 'stat-value' }, String(e.noches_jugadas ?? 0)),
+      el('div', { class: 'stat-label' }, 'Noches'),
+    ]),
+    el('div', { class: 'stat-tile' }, [
+      el('div', { class: 'stat-value' }, String(e.partidos ?? 0)),
+      el('div', { class: 'stat-label' }, 'Partidos'),
+    ]),
+    el('div', { class: 'stat-tile' }, [
+      el('div', { class: 'stat-value' }, e.pct_ganados != null ? `${e.pct_ganados}%` : '—'),
+      el('div', { class: 'stat-label' }, 'Ganados'),
+    ]),
+  ]));
+  if (e.mejor_noche_puntos) {
+    card.appendChild(el('div', { class: 'aviso aviso-info mt-3' },
+      `Tu mejor noche: ${Number(e.mejor_noche_puntos).toFixed(0)} puntos el ${formatFecha(e.mejor_noche_fecha)}`
+      + (e.mejor_noche_cat ? ` en Categoría ${e.mejor_noche_cat}.` : '.')));
+  }
+  wrap.appendChild(card);
+  return wrap;
+}
+
+/* ---------- 4. Tus rivales ---------- */
+async function renderTusRivales(host) {
+  host.appendChild(el('div', { class: 'section-title' }, 'Tus rivales'));
+  const card = el('div', { class: 'card' });
+  card.appendChild(el('div', { class: 'skeleton', style: 'height:110px;' }));
+  host.appendChild(card);
+
+  let rivales = [];
+  try {
+    const mod = await import('../api.js');
+    if (typeof mod.getMisRivales !== 'function') { card.innerHTML = ''; return; }
+    rivales = await mod.getMisRivales();
+  } catch (err) {
+    card.innerHTML = '';
+    card.appendChild(el('p', { class: 'text-tiny' }, 'No se pudieron cargar tus rivales.'));
+    return;
+  }
+
+  // Con uno o dos enfrentamientos esto es ruido ("tu víctima favorita: 1 de 1").
+  const MIN = 3;
+  const conHistoria = rivales.filter((r) => r.total >= MIN);
+  card.innerHTML = '';
+
+  if (!conHistoria.length) {
+    card.appendChild(el('p', { class: 'text-muted' },
+      `Todavía no te has topado ${MIN} veces con nadie. Juega un par de noches más y aquí van a salir tus clásicos.`));
+    return;
+  }
+
+  const gano = [...conHistoria].sort((a, b) => (b.ganados - b.perdidos) - (a.ganados - a.perdidos))[0];
+  const pierdo = [...conHistoria].sort((a, b) => (b.perdidos - b.ganados) - (a.perdidos - a.ganados))[0];
+
+  const bloque = (titulo, r, bueno) => el('div', { class: 'row-between', style: 'padding:6px 0;' }, [
+    el('div', { class: 'row gap-2', style: 'align-items:center;min-width:0;' }, [
+      el('span', { class: 'avatar-mini' }, avatarContent(r)),
+      el('div', { style: 'min-width:0;' }, [
+        el('div', { class: 'text-tiny', style: 'color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:800;' }, titulo),
+        el('div', { style: 'font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' }, r.full_name),
+      ]),
+    ]),
+    el('div', { class: 'marcador-rival' }, [
+      el('span', { class: bueno ? 'g' : 'p' }, String(r.ganados)),
+      el('span', { class: 'sep' }, '–'),
+      el('span', { class: bueno ? 'p' : 'g' }, String(r.perdidos)),
+    ]),
+  ]);
+
+  if (gano && (gano.ganados > gano.perdidos)) card.appendChild(bloque('A quién le ganas más', gano, true));
+  if (pierdo && (pierdo.perdidos > pierdo.ganados)) {
+    if (card.children.length) card.appendChild(el('hr', { class: 'sep', style: 'margin:8px 0;' }));
+    card.appendChild(bloque('Contra quién pierdes más', pierdo, false));
+  }
+  if (!card.children.length) {
+    card.appendChild(el('p', { class: 'text-muted' }, 'Vas parejo con todos tus rivales: ninguno te saca ventaja todavía.'));
+  }
+  card.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' },
+    'En pádel siempre son dos contra dos: esto cuenta los partidos en los que estuvieron en lados opuestos de la red.'));
+}
+
+/* ---------- 5. Tus puntos ---------- */
+async function renderTusPuntos(host) {
+  host.appendChild(el('div', { class: 'section-title' }, 'Tus puntos'));
+  const card = el('div', { class: 'card' });
+  card.appendChild(el('div', { class: 'skeleton', style: 'height:120px;' }));
+  host.appendChild(card);
+
+  let noches = [];
+  try {
+    const mod = await import('../api.js');
+    if (typeof mod.getMisPuntosPorNoche !== 'function') { card.innerHTML = ''; return; }
+    noches = await mod.getMisPuntosPorNoche(null, 8);
+  } catch (err) {
+    card.innerHTML = '';
+    card.appendChild(el('p', { class: 'text-tiny' }, 'No se pudieron cargar tus puntos.'));
+    return;
+  }
+  card.innerHTML = '';
+  if (!noches.length) {
+    card.appendChild(el('p', { class: 'text-muted' }, 'Todavía no tienes noches jugadas.'));
+    return;
+  }
+
+  const orden = [...noches].reverse();              // de la más vieja a la más nueva
+  const max = Math.max(...orden.map((n) => Number(n.puntos) || 0), 1);
+  const barras = el('div', { class: 'barras-puntos' });
+  orden.forEach((n, i) => {
+    const alto = Math.max(6, Math.round(72 * (Number(n.puntos) || 0) / max));
+    const col = el('div', {}, [
+      el('div', { class: 'text-tiny', style: 'text-align:center;font-weight:800;font-size:10px;' },
+        Number(n.puntos).toFixed(0)),
+      el('div', { class: 'barra', style: `height:${alto}px;animation-delay:${i * 55}ms;` }),
+      el('div', { class: 'pie' }, formatFechaCortaSegura(n.session_date)),
+    ]);
+    barras.appendChild(col);
+  });
+  card.appendChild(barras);
+  card.appendChild(el('p', { class: 'text-tiny mt-3', style: 'color:var(--text-tertiary);' },
+    'Tus últimas noches, de la más vieja a la más reciente.'));
+}
+
+function formatFechaCortaSegura(fecha) {
+  try {
+    const d = new Date(fecha + 'T12:00:00Z');
+    return d.toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City', day: 'numeric', month: 'short' })
+      .replace('.', '');
+  } catch { return ''; }
+}
+
+/* ---------- La playera ganada: elegir talla ---------- */
+function renderElegirTalla(premio) {
+  const TALLAS = ['S', 'M', 'L', 'XL', 'XXL'];
+  const card = el('div', { class: 'card mb-3', style: 'border:1.5px solid var(--oro);' });
+  card.appendChild(el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
+    el('span', { html: icon.trophy, style: 'width:20px;height:20px;color:var(--oro);' }),
+    el('div', { style: 'font-weight:800;font-size:15px;color:var(--oro);' }, '¡Ganaste la playera de campeón!'),
+  ]));
+  card.appendChild(el('p', { class: 'text-tiny mt-2' },
+    `${premio.descripcion || 'Campeón del mes'}. Elige tu talla y recógela en recepción.`));
+  const fila = el('div', { class: 'row gap-2 mt-3', style: 'flex-wrap:wrap;' });
+  TALLAS.forEach((t) => {
+    const b = el('button', { class: 'btn btn-secondary btn-sm', style: 'width:auto;min-width:54px;' }, t);
+    b.addEventListener('click', async () => {
+      Array.from(fila.children).forEach((x) => { x.disabled = true; });
+      try {
+        const mod = await import('../api.js');
+        if (typeof mod.elegirTallaPlayera !== 'function') throw new Error('Cierra la app y vuelve a abrirla.');
+        await mod.elegirTallaPlayera(premio.id, t);
+        toast(`Listo, talla ${t} apartada. Pásala a recoger a recepción.`, 'success');
+        card.remove();
+      } catch (err) {
+        toast(humanizeError(err), 'error');
+        Array.from(fila.children).forEach((x) => { x.disabled = false; });
+      }
+    });
+    fila.appendChild(b);
+  });
+  card.appendChild(fila);
+  return card;
 }
 
 const TIER_NOMBRE = { liguilla_a: 'Liguilla · Categoría A', ascenso_b: 'Liguilla Categoría B' };
@@ -394,41 +740,6 @@ function renderConfirmarLiguilla(info) {
    aun_posible y un mensaje. Aqui solo se elige la version corta, porque la
    larga ya vive en la pestana de Liguilla. Si la RPC falla o el jugador
    todavia no tiene carrera, no se pinta nada — nunca un hueco raro. */
-function renderFaltanteLiguilla(carrera) {
-  if (!carrera || carrera.mi_rank == null) return null;
-
-  const fila = el('button', {
-    class: 'fila-enlace mt-3',
-    style: 'width:100%;background:transparent;border:0;padding:10px 0 0;border-top:1px solid var(--border);',
-    onclick: () => navigate('/liguilla'),
-  });
-
-  let texto;
-  let color = 'var(--text-secondary)';
-  if (carrera.ya_calificado) {
-    texto = carrera.margen == null
-      ? 'Vas calificado a la Liguilla'
-      : `Vas calificado · ${Number(carrera.margen).toFixed(0)} pts de colchón`;
-    color = 'var(--oro)';
-  } else if (carrera.aun_posible === false) {
-    texto = 'Este mes ya no alcanzas la Liguilla';
-    color = 'var(--text-tertiary)';
-  } else if (carrera.margen != null) {
-    texto = `Te faltan ${Number(carrera.margen).toFixed(0)} pts para la Liguilla`;
-    color = 'var(--warning)';
-  } else {
-    texto = 'Todavía no hay línea de corte este mes';
-  }
-
-  fila.appendChild(el('div', { class: 'row-between', style: 'align-items:center;' }, [
-    el('div', { class: 'row gap-2', style: 'align-items:center;' }, [
-      el('span', { html: icon.trophy, style: `width:15px;height:15px;color:${color};` }),
-      el('span', { style: `font-size:12.5px;font-weight:700;color:${color};` }, texto),
-    ]),
-    el('span', { html: icon.chevronRight, style: 'width:16px;height:16px;color:var(--text-tertiary);' }),
-  ]));
-  return fila;
-}
 
 /* ============================================================
    La convocatoria que esta mas cerca de jugarse (2.6)
@@ -473,7 +784,7 @@ function renderSugerenciaConvocatoria(f) {
 
     card.appendChild(el('div', { class: 'row-between' }, [
       el('div', { class: 'text-tiny', style: 'text-transform:uppercase;letter-spacing:0.06em;color:var(--text-tertiary);font-weight:800;' },
-        'Lo que sigue'),
+        'Tu próxima jugada'),
       f.categoria ? el('span', { class: `badge ${CAT_BADGE_CLASS[f.categoria] || 'badge-neutral'}` },
         CAT_LABEL[f.categoria] || f.categoria) : null,
     ]));

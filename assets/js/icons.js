@@ -18,6 +18,8 @@ export const icon = {
   // Copa CON asas: sin ellas se lee como copa de vino, no como trofeo
   // (se vio así en la barra de abajo y en el encabezado de Liguilla).
   trophy: svg('<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4.5A1.5 1.5 0 0 0 3 7.5 3.5 3.5 0 0 0 6.5 11H7"/><path d="M17 6h2.5A1.5 1.5 0 0 1 21 7.5 3.5 3.5 0 0 1 17.5 11H17"/>'),
+  // Playera de campeón (premio mensual de la liga).
+  playera: svg('<path d="M8.6 3.2 5 5a1 1 0 0 0-.53.72l-.9 4.7a1 1 0 0 0 .8 1.17l2.13.4V20a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-8.01l2.13-.4a1 1 0 0 0 .8-1.17l-.9-4.7A1 1 0 0 0 19 5l-3.6-1.8"/><path d="M8.6 3.2a3.4 3.4 0 0 0 6.8 0"/>'),
   clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>'),
   swap: svg('<path d="M7 7h11l-3-3M17 17H6l3 3"/>'),
   info: svg('<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/>'),
