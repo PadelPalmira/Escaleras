@@ -78,7 +78,10 @@ export async function renderConvocatorias() {
   // contestan. Sin esto, una noche con una invitación en el aire se ve igual
   // de llena que una noche de verdad llena.
   const idsParejas = filas.filter((f) => f.formato === 'parejas').map((f) => f.escalera_id);
-  const pend = await parejasPorConfirmarSeguro(idsParejas);
+  const [pend] = await Promise.all([
+    parejasPorConfirmarSeguro(idsParejas),
+    cargarCausas(filas),
+  ]);
   filas.forEach((f) => {
     if (pend[f.escalera_id]) f.por_confirmar = pend[f.escalera_id].jugadores;
   });
@@ -86,7 +89,7 @@ export async function renderConvocatorias() {
   const wrap = el('div');
   wrap.appendChild(el('div', { class: 'h1 mb-2' }, 'Convocatorias'));
   wrap.appendChild(el('p', { class: 'text-muted mb-4' },
-    'Toda la semana se convoca el domingo a las 10:00 am.'));
+    'La semana se convoca el domingo a las 10:00 am. Las de causa abren antes.'));
 
   wrap.appendChild(renderComoFunciona());
 
@@ -207,13 +210,71 @@ function renderComoFunciona() {
   return box;
 }
 
+/* El Lunes del Fondo Apapacho se juega de 11:30 a 13:30, así que media
+   app se quedó diciendo "noche" donde ya no es noche. Esto decide la
+   palabra por la hora en que empieza, en vez de darla por hecha. */
+function esDeDia(f) {
+  const h = parseInt(String(f.start_time || '20:00').slice(0, 2), 10);
+  return Number.isFinite(h) && h < 15;
+}
+function cuandoEsto(f) { return esDeDia(f) ? 'esta mañana' : 'esta noche'; }
+function diaDeLaSemana(fechaStr) {
+  const t = formatFecha(fechaStr);                 // "Lunes, 23 de noviembre"
+  const dia = String(t).split(',')[0];
+  return dia ? dia.toLowerCase() : 'ese día';
+}
+
+/* ============================================================
+   Noches con causa (3.1)
+   ------------------------------------------------------------
+   El Lunes del Fondo Apapacho es una noche de Retas Abiertas
+   normal por dentro; lo único distinto es a dónde va el dinero.
+   Esa información se pide aparte y con guarda: si el navegador
+   trae un api.js viejo en caché, la noche se ve como una reta
+   cualquiera en vez de tumbar toda la pantalla.
+   ============================================================ */
+async function cargarCausas(filas) {
+  try {
+    const mod = await import('../api.js');
+    if (typeof mod.getEscalerasConCausa !== 'function') return null;
+    const causas = await mod.getEscalerasConCausa();
+    if (!causas || !causas.length) return null;
+    const porId = new Map(causas.map((c) => [c.escalera_id, c]));
+    filas.forEach((f) => {
+      const c = porId.get(f.escalera_id);
+      if (c) f.causa_info = c;
+    });
+    return causas[0].causa;
+  } catch {
+    return null;
+  }
+}
+
+async function marcaDeLaCausa(opciones) {
+  try {
+    const mod = await import('../vendor/apapacho.js');
+    return mod.logoApapacho(opciones);
+  } catch {
+    return null;
+  }
+}
+
 /* ============================================================
    Tarjeta de una convocatoria
    ============================================================ */
 function renderTarjeta(f, profile, refresh, avisoArriba) {
-  const card = el('div', { class: 'card' });
+  const causa = f.causa_info || null;
+  const card = el('div', { class: 'card' + (causa ? ' tarjeta-causa' : '') });
   const tengoRegistroActivo = f.mi_status && ACTIVO.includes(f.mi_status);
   const st = f.mi_status ? STATUS_LABEL[f.mi_status] : null;
+
+  // El corazón va hasta arriba, antes de la fecha: es lo que hace que
+  // esta noche se distinga de las otras cinco sin tener que leerla.
+  if (causa) {
+    const hueco = el('div', { class: 'mb-3' });
+    card.appendChild(hueco);
+    marcaDeLaCausa({ alto: 58 }).then((n) => { if (n) hueco.appendChild(n); });
+  }
 
   card.appendChild(el('div', { class: 'row-between' }, [
     el('div', {}, [
@@ -224,12 +285,26 @@ function renderTarjeta(f, profile, refresh, avisoArriba) {
     el('div', { class: 'stack gap-1', style: 'align-items:flex-end;' }, [
       st && (tengoRegistroActivo || f.mi_sustituto_nombre)
         ? el('span', { class: `badge ${st.cls}` }, st.text) : null,
-      f.es_categoria_recomendada && !tengoRegistroActivo
+      causa ? el('span', { class: 'badge badge-causa' }, 'Con causa') : null,
+      f.es_categoria_recomendada && !tengoRegistroActivo && !causa
         ? el('span', { class: 'badge badge-neutral', style: 'font-size:10px;' }, 'Recomendada para tu nivel') : null,
     ]),
   ]));
 
-  card.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' }, FORMAT_HINT[f.formato]));
+  // Con causa, la explicación de la causa manda sobre la del formato:
+  // lo que hay que entender de esa mañana no es cómo se juega (es una
+  // reta como las del viernes), es a dónde va el dinero.
+  if (causa) {
+    const hueco = el('div');
+    card.appendChild(hueco);
+    import('../vendor/apapacho.js')
+      .then((mod) => { hueco.appendChild(mod.avisoCausa(causa)); })
+      .catch(() => {
+        hueco.appendChild(el('p', { class: 'text-tiny mt-2' }, causa.destino || ''));
+      });
+  } else {
+    card.appendChild(el('p', { class: 'text-tiny mt-2', style: 'color:var(--text-tertiary);' }, FORMAT_HINT[f.formato]));
+  }
 
   // Toda la noche tiene su propia página: quiénes van, el reglamento del
   // formato, cuántos faltan y, cuando ya se jugó, cómo quedó todo mundo.
@@ -237,7 +312,7 @@ function renderTarjeta(f, profile, refresh, avisoArriba) {
     class: 'btn btn-ghost btn-sm mt-2',
     style: 'width:auto;padding-left:0;font-weight:700;color:var(--cyan);',
     onclick: () => navigate('/convocatoria?id=' + f.escalera_id),
-  }, 'Ver esta noche completa →'));
+  }, esDeDia(f) ? 'Ver esta mañana completa →' : 'Ver esta noche completa →'));
 
   // Noche cancelada: antes simplemente desaparecía de la lista y el jugador
   // se quedaba sin saber si seguía en pie. Ahora se queda a la vista, con su
@@ -1042,7 +1117,7 @@ function renderRetas(f, profile, refresh) {
   const social = el('div', { class: 'retas-social mt-3' });
   const countLine = el('div', { class: 'row gap-2' }, [
     el('span', { class: 'retas-count-number' }, '···'),
-    el('span', { class: 'text-muted retas-count-label' }, 'anotados esta noche'),
+    el('span', { class: 'text-muted retas-count-label' }, 'anotados ' + cuandoEsto(f)),
   ]);
   const namesLine = el('div', { class: 'text-tiny mt-1' }, 'Cargando…');
   social.append(countLine, namesLine);
@@ -1071,7 +1146,8 @@ function renderRetas(f, profile, refresh) {
         if (r && r.resultado === 'en_espera') {
           toast(r.aviso || 'Ya se llenó — quedaste en la lista de espera.', 'info', 7000);
         } else {
-          toast((r && r.aviso) || '¡Anotado! Nos vemos el viernes.', 'success', r && r.aviso ? 6000 : 3200);
+          toast((r && r.aviso) || `¡Anotado! Nos vemos el ${diaDeLaSemana(f.session_date)}.`,
+            'success', r && r.aviso ? 6000 : 3200);
         }
       }
       refresh();
@@ -1089,7 +1165,7 @@ function renderRetas(f, profile, refresh) {
     // del club. El jugador ve cuánta gente va, nunca el límite (19 oct 2026).
     countLine.querySelector('.retas-count-number').textContent = String(inscritos.length);
     countLine.querySelector('.retas-count-label').textContent =
-      inscritos.length === 1 ? 'anotado esta noche' : 'anotados esta noche';
+      (inscritos.length === 1 ? 'anotado ' : 'anotados ') + cuandoEsto(f);
     namesLine.textContent = inscritos.length
       ? inscritos.map((r) => (r.profiles?.full_name || 'Jugador').trim().split(' ')[0]).join(', ')
       : 'Todavía nadie se ha anotado — sé el primero en animar.';
@@ -1134,7 +1210,7 @@ const FORMATO_EXPLICADO = {
     ],
   },
   retas_abiertas: {
-    titulo: 'Retas Abiertas — noche libre',
+    titulo: 'Retas Abiertas — libre y social',
     puntos: [
       'Nivel libre, sin categorías y sin puntos: llegas y juegas.',
       'No reparte puntos, ni ranking, ni cashback.',
@@ -1179,6 +1255,8 @@ export async function renderConvocatoriaDetalle() {
     if (pend[escaleraId]) f.por_confirmar = pend[escaleraId].jugadores;
   }
 
+  if (f) await cargarCausas([f]);
+
   wrap.appendChild(el('button', {
     class: 'btn btn-ghost btn-sm mb-2', style: 'width:auto;padding-left:0;',
     onclick: () => navigate('/convocatorias'),
@@ -1206,7 +1284,37 @@ export async function renderConvocatoriaDetalle() {
     st = { text: 'Jugaste', cls: 'badge-success' };
   }
   const tengoRegistroActivo = (f.mi_status && ACTIVO.includes(f.mi_status)) || (yaCerro && st && st.text === 'Jugaste');
-  wrap.appendChild(el('div', { class: 'card' }, [
+  const causa = f.causa_info || null;
+
+  if (causa) {
+    const cab = el('div', { class: 'card tarjeta-causa' });
+    const hueco = el('div');
+    cab.appendChild(hueco);
+    marcaDeLaCausa({ alto: 92 }).then((n) => { if (n) hueco.appendChild(n); });
+    // La fecha NO se repite aquí: la tarjeta de abajo ya la encabeza, y
+    // dos tarjetas seguidas con el mismo día se leen como un error.
+    cab.appendChild(el('div', { class: 'h2 mt-3', style: 'text-align:center;' },
+      causa.titulo || 'Retas con causa'));
+
+    // El dinero, antes que cualquier otra cosa: es de lo que se trata.
+    const cajaMonto = el('div');
+    cab.appendChild(cajaMonto);
+    (async () => {
+      try {
+        const [api, marca] = await Promise.all([
+          import('../api.js'), import('../vendor/apapacho.js'),
+        ]);
+        cajaMonto.appendChild(marca.avisoCausa(causa));
+        if (typeof api.getRecaudadoCausa !== 'function') return;
+        const r = await api.getRecaudadoCausa(causa.causa);
+        const panel = marca.panelRecaudado(r);
+        if (panel) cajaMonto.appendChild(panel);
+      } catch { /* la noche sigue siendo utilizable sin el contador */ }
+    })();
+    wrap.appendChild(cab);
+  }
+
+  wrap.appendChild(el('div', { class: 'card' + (causa ? ' mt-3' : '') }, [
     el('div', { class: 'row-between' }, [
       el('div', {}, [
         el('div', { class: 'h2' }, formatFecha(f.session_date)),
@@ -1294,10 +1402,11 @@ export async function renderConvocatoriaDetalle() {
     }
   }
 
-  /* ---------- Cómo se juega esta noche ---------- */
+  /* ---------- Cómo se juega ---------- */
   const expl = FORMATO_EXPLICADO[f.formato];
   if (expl) {
-    wrap.appendChild(el('div', { class: 'section-title' }, 'Cómo se juega esta noche'));
+    wrap.appendChild(el('div', { class: 'section-title' },
+      esDeDia(f) ? 'Cómo se juega esta mañana' : 'Cómo se juega esta noche'));
     const card = el('div', { class: 'card' });
     card.appendChild(el('div', { style: 'font-weight:800;font-size:14.5px;' }, expl.titulo));
     const ul = el('ul', { class: 'lista-reglas mt-2' });

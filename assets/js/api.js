@@ -1617,6 +1617,27 @@ export async function registrarEntregaPlayera(recognitionId, talla) {
   return data;
 }
 
+/* ---------- Noches con causa (Fondo Apapacho) ---------- */
+
+/* Qué noches de las próximas semanas donan lo recaudado, y a quién.
+   Devuelve solo las que el jugador ya puede ver, igual que
+   mis_convocatorias, así que se puede cruzar por escalera_id sin más. */
+export async function getEscalerasConCausa(desde = null, hasta = null) {
+  const { data, error } = await supabase.rpc('escaleras_con_causa', {
+    p_desde: desde, p_hasta: hasta,
+  });
+  if (error) throw error;
+  return data || [];
+}
+
+/* Cuánto se lleva recaudado para una causa. Solo cuenta noches ya
+   cerradas; lo de la noche que viene viene aparte como "va juntando". */
+export async function getRecaudadoCausa(causa) {
+  const { data, error } = await supabase.rpc('recaudado_causa', { p_causa: causa });
+  if (error) throw error;
+  return data;
+}
+
 /* ¿La Liguilla está prendida? Con esto se esconde (o se vuelve a mostrar)
    su pestaña y todas sus puertas de entrada, sin tocar una línea de su
    código: el día que el club la retome, se prende el ajuste y vuelve. */

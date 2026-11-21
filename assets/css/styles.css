@@ -907,12 +907,87 @@ hr.sep{ border: none; border-top: 1px solid var(--border); margin: var(--sp-5) 0
 }
 .chip-listo{ background: var(--success-dim); color: var(--success); }
 
+/* ============================================================
+   3.1 — Noches con causa (Fondo Apapacho)
+   ------------------------------------------------------------
+   Rosa del fondo, no el magenta de la app: la noche con causa
+   tiene que distinguirse de un vistazo entre las demás, sin
+   dejar de verse parte de la misma app.
+   ============================================================ */
+:root{
+  --causa: #ff5fa2;
+  --causa-suave: rgba(255, 95, 162, 0.13);
+  --causa-borde: rgba(255, 95, 162, 0.42);
+}
+
+.tarjeta-causa{
+  position: relative; overflow: hidden;
+  border: 1.5px solid var(--causa-borde) !important;
+  background:
+    radial-gradient(120% 90% at 50% -20%, rgba(255,95,162,0.20) 0%, rgba(255,95,162,0) 62%),
+    var(--surface);
+}
+/* El glow rosa: una mancha suave que respira detrás del corazón. */
+.tarjeta-causa::before{
+  content: ''; position: absolute; inset: -40% -20% auto -20%; height: 150%;
+  background: radial-gradient(50% 50% at 50% 30%, rgba(255,95,162,0.28) 0%, rgba(255,95,162,0) 70%);
+  pointer-events: none;
+  animation: causa-respira 5.5s ease-in-out infinite;
+}
+.tarjeta-causa > *{ position: relative; }
+@keyframes causa-respira{
+  0%, 100%{ opacity: 0.55; transform: scale(1); }
+  50%     { opacity: 1;    transform: scale(1.06); }
+}
+
+/* La marca: corazón arriba, nombre abajo. */
+.marca-causa{ display: flex; flex-direction: column; gap: var(--sp-2); }
+.marca-causa-centro{ align-items: center; text-align: center; }
+.corazon-apapacho{
+  display: block;
+  filter: drop-shadow(0 6px 20px rgba(255, 95, 162, 0.45));
+  animation: corazon-entra 760ms var(--ease) both;
+}
+@keyframes corazon-entra{
+  0%  { opacity: 0; transform: scale(0.62) translateY(10px); }
+  62% { opacity: 1; transform: scale(1.06) translateY(0); }
+  100%{ opacity: 1; transform: scale(1) translateY(0); }
+}
+/* El nombre NO sale de la imagen: es la tipografía de la app. */
+.nombre-causa{
+  display: flex; gap: 7px; align-items: baseline; justify-content: center;
+  font-weight: 800; font-size: 19px; letter-spacing: 0.04em; line-height: 1.1;
+}
+.nombre-causa .nc-1{ color: #fff; }
+.nombre-causa .nc-2{ color: var(--causa); }
+
+.badge-causa{
+  background: var(--causa-suave); color: var(--causa);
+  border: 1px solid var(--causa-borde);
+}
+.aviso-causa{
+  background: var(--causa-suave);
+  border: 1px solid var(--causa-borde);
+  border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4);
+}
+/* Cuánto se lleva recaudado. */
+.recaudado{ text-align: center; }
+.recaudado .monto{
+  font-size: 38px; font-weight: 800; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--causa);
+  text-shadow: 0 0 28px rgba(255, 95, 162, 0.45);
+}
+.recaudado .pie-monto{ font-size: 12px; color: var(--text-tertiary); margin-top: 4px; }
+
 /* Quien pide menos movimiento no recibe nada de esto: ni entradas, ni
-   resplandor que se mueva, ni barras que crezcan. */
+   resplandor que se mueva, ni barras que crezcan. El corazón y el rosa
+   siguen ahí — lo que se quita es el movimiento, no la información. */
 @media (prefers-reduced-motion: reduce){
   .entra, .barra-premio > i, .barras-puntos .barra{ animation: none !important; }
   .barra-premio > i{ width: var(--ancho-final, 0); }
   .resplandor-marca{ animation: none; }
+  .tarjeta-causa::before{ animation: none; opacity: 0.8; }
+  .corazon-apapacho{ animation: none; }
   /* El desenfoque también cuesta batería en teléfonos modestos. */
   .panel-vidrio{ -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(26,26,30,0.92); }
 }

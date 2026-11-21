@@ -79,6 +79,24 @@ async function renderInicioJugador(profile) {
     } catch { /* si falla, se omite el matiz en vez de inventarlo */ }
   }
 
+  // ¿Alguna de estas noches dona lo recaudado? Con guarda: estas funciones
+  // son nuevas y un navegador puede traer el api.js viejo en caché — en ese
+  // caso la noche se ve como una reta normal y la app entra igual.
+  try {
+    const mod = await import('../api.js');
+    if (typeof mod.getEscalerasConCausa === 'function') {
+      const causas = await mod.getEscalerasConCausa();
+      if (causas && causas.length) {
+        const porId = new Map(causas.map((c) => [c.escalera_id, c]));
+        convocatorias.forEach((f) => {
+          const c = porId.get(f.escalera_id);
+          if (c) f.causa_info = c;
+        });
+        if (nocheSugerida) nocheSugerida.causa_info = porId.get(nocheSugerida.escalera_id) || null;
+      }
+    }
+  } catch { /* sin causa: todo sigue funcionando igual */ }
+
   // Todo el tablero en una sola llamada (antes el Inicio hacía seis idas
   // y vueltas y en señal mala se notaba).
   let tablero = null; let premios = [];
@@ -335,17 +353,28 @@ function renderProximaCompacta(f, proximosRegistros) {
                         : (n === 1 ? 'falta 1 jugador' : `faltan ${n} jugadores`)}`
       : ' · está completa';
   }
+  const causa = f.causa_info || null;
   return el('button', {
-    class: 'card fila-enlace mt-3', style: 'border-color:var(--cyan);',
+    class: 'card fila-enlace mt-3' + (causa ? ' tarjeta-causa' : ''),
+    style: causa ? '' : 'border-color:var(--cyan);',
     onclick: () => navigate('/convocatoria?id=' + f.escalera_id),
   }, [
     el('div', { class: 'row gap-2', style: 'align-items:center;min-width:0;' }, [
-      el('span', { html: icon.calendar, style: 'width:18px;height:18px;color:var(--cyan);flex:0 0 auto;' }),
+      el('span', {
+        html: causa ? icon.corazon : icon.calendar,
+        style: `width:18px;height:18px;color:${causa ? 'var(--causa)' : 'var(--cyan)'};flex:0 0 auto;`,
+      }),
       el('div', { style: 'min-width:0;text-align:left;' }, [
         el('div', { class: 'text-tiny', style: 'text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:800;' },
           'Tu próxima jugada'),
         el('div', { style: 'font-weight:700;font-size:14px;' },
-          `${FORMATO_LARGO[f.formato] || f.formato} · ${formatFecha(f.session_date)}${falta}`),
+          causa
+            ? `${causa.titulo || 'Retas con causa'} · ${formatFecha(f.session_date)}`
+            : `${FORMATO_LARGO[f.formato] || f.formato} · ${formatFecha(f.session_date)}${falta}`),
+        causa
+          ? el('div', { class: 'text-tiny', style: 'color:var(--causa);font-weight:700;' },
+              causa.nombre || '')
+          : null,
       ]),
     ]),
     el('span', { html: icon.chevronRight, style: 'width:18px;height:18px;color:var(--text-tertiary);' }),
@@ -753,7 +782,15 @@ function renderConfirmarLiguilla(info) {
    ============================================================ */
 function sugerenciaConvocatoria(convocatorias) {
   const candidatas = (convocatorias || []).filter((f) => {
-    if (!f.ventana_abierta) return false;
+    // OJO con ventana_abierta: NO significa "se puede anotar". Es la
+    // ventana de VENTAJA del top del ranking, que solo vive el domingo de
+    // 10 a 18, y en Retas Abiertas vale false siempre (no hay ranking que
+    // repartir). Filtrar por ella dejaba este panel vacío el 99% del
+    // tiempo: comprobado contra producción el 20 nov 2026, las dos noches
+    // visibles traían abierta=false y "Tu próxima jugada" no salía nunca.
+    // Lo que de verdad importa es si el jugador todavía puede hacer algo
+    // con esa noche, y todo lo que devuelve mis_convocatorias ya está
+    // abierto para él.
     if (f.es_liguilla) return false;
     if (f.esc_status && f.esc_status !== 'scheduled') return false;
     // Ya tiene lugar (o esta en la fila): no es algo que sugerirle.
@@ -780,15 +817,33 @@ function renderSugerenciaConvocatoria(f) {
   if (f) {
     const esParejas = f.formato === 'parejas';
     const esRetas = f.formato === 'retas_abiertas';
-    const card = el('div', { class: 'card mt-4', style: 'border-color:var(--cyan);' });
+    const causa = f.causa_info || null;
+    const card = el('div', {
+      class: 'card mt-4' + (causa ? ' tarjeta-causa' : ''),
+      style: causa ? '' : 'border-color:var(--cyan);',
+    });
 
     card.appendChild(el('div', { class: 'row-between' }, [
       el('div', { class: 'text-tiny', style: 'text-transform:uppercase;letter-spacing:0.06em;color:var(--text-tertiary);font-weight:800;' },
         'Tu próxima jugada'),
-      f.categoria ? el('span', { class: `badge ${CAT_BADGE_CLASS[f.categoria] || 'badge-neutral'}` },
-        CAT_LABEL[f.categoria] || f.categoria) : null,
+      causa
+        ? el('span', { class: 'badge badge-causa' }, 'Con causa')
+        : (f.categoria ? el('span', { class: `badge ${CAT_BADGE_CLASS[f.categoria] || 'badge-neutral'}` },
+            CAT_LABEL[f.categoria] || f.categoria) : null),
     ]));
-    card.appendChild(el('div', { class: 'h2 mt-2' }, FORMATO_LARGO[f.formato] || f.formato));
+
+    if (causa) {
+      const hueco = el('div', { class: 'mt-3' });
+      card.appendChild(hueco);
+      import('../vendor/apapacho.js')
+        .then((mod) => { hueco.appendChild(mod.logoApapacho({ alto: 64 })); })
+        .catch(() => { /* sin el corazón la tarjeta sigue sirviendo */ });
+    }
+
+    // El nombre del fondo ya lo dice el logo de arriba: repetirlo aquí
+    // dejaba "Fondo Apapacho" dos veces seguidas.
+    card.appendChild(el('div', { class: 'h2 mt-2' },
+      causa ? (causa.titulo || 'Retas con causa') : (FORMATO_LARGO[f.formato] || f.formato)));
     card.appendChild(el('p', { class: 'text-muted mt-1' }, formatFecha(f.session_date)));
     card.appendChild(el('p', { class: 'text-muted' },
       `${formatHora(f.start_time)}${f.end_time ? ' – ' + formatHora(f.end_time) : ''}`));
@@ -797,7 +852,10 @@ function renderSugerenciaConvocatoria(f) {
     // recepcion (instruccion del 22 oct 2026). Decir "faltan N" aqui seria
     // justo la fuga que se cerro en el 2.5.
     if (esRetas) {
-      card.appendChild(el('p', { class: 'text-tiny mt-3' }, 'Nivel libre y sin puntos. Se paga en recepción.'));
+      card.appendChild(el('p', { class: 'text-tiny mt-3' },
+        causa
+          ? (causa.destino || 'Lo que se recaude se dona completo.') + ' Nivel libre y sin puntos. Se paga en recepción.'
+          : 'Nivel libre y sin puntos. Se paga en recepción.'));
     } else {
       const cap = f.capacidad || 12;
       const total = esParejas ? Math.floor(cap / 2) : cap;
@@ -815,7 +873,7 @@ function renderSugerenciaConvocatoria(f) {
         : '';
       card.appendChild(el('div', { class: `aviso ${faltan > 0 || enElAire > 0 ? 'aviso-warn' : 'aviso-info'} mt-3` },
         faltan > 0
-          ? `Van ${firmes} de ${total} en firme.${sinConfirmar} Faltan ${faltan} ${unidad} para que esta noche se juegue.`
+          ? `Van ${firmes} de ${total} en firme.${sinConfirmar} Faltan ${faltan} ${unidad} para que se juegue.`
           : (enElAire > 0
               ? `Está completa, pero solo ${firmes} de ${total} en firme.${sinConfirmar}`
               : `Ya está completa (${van} de ${total}). Te puedes anotar a la lista de espera.`)));

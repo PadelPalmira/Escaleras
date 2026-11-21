@@ -99,7 +99,9 @@ export async function renderAdminPlayeras() {
     if (alertas.length) {
       cuerpo.appendChild(el('div', { class: 'aviso aviso-danger mt-3' }, [
         el('strong', {}, 'Hay que reponer: '),
-        alertas.map((t) => `${t.talla} (quedarían ${t.quedarian})`).join(', ') + '.',
+        alertas.map((t) => (t.quedarian < 0
+          ? `${t.talla} (faltan ${-t.quedarian})`
+          : `${t.talla} (quedarían ${t.quedarian})`)).join(', ') + '.',
       ]));
     }
 
@@ -117,9 +119,13 @@ export async function renderAdminPlayeras() {
           el('div', {}, [
             el('div', { style: 'font-weight:700;font-size:14px;' }, `${t.hay} en existencia`),
             el('div', { class: 'text-tiny', style: t.alerta ? 'color:var(--danger);' : 'color:var(--text-tertiary);' },
-              t.apartadas > 0
-                ? `${t.apartadas} apartada${t.apartadas === 1 ? '' : 's'} · quedarían ${t.quedarian}`
-                : (t.alerta ? 'Hay que reponer' : 'Sin apartar')),
+              t.quedarian < 0
+                // Pidieron más de las que hay: "quedarían -1" no se
+                // entiende, lo que importa es cuántas faltan comprar.
+                ? `${t.apartadas} apartada${t.apartadas === 1 ? '' : 's'} y no alcanzan: faltan ${-t.quedarian}`
+                : t.apartadas > 0
+                  ? `${t.apartadas} apartada${t.apartadas === 1 ? '' : 's'} · quedarían ${t.quedarian}`
+                  : (t.alerta ? 'Hay que reponer' : (t.hay > 0 ? 'Sin apartar' : 'No se surte'))),
           ]),
         ]),
         el('button', {
